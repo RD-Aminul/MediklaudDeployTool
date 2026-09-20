@@ -133,8 +133,24 @@ const YARN_BUILD_MILESTONES = [
 	{ re: /File sizes after gzip/i, percent: 90 },
 ]
 
+// Not every machine this tool runs on has yarn installed globally — react-scripts
+// prints the exact same milestones either way, so npm works as a drop-in
+// fallback with no change to progress tracking below.
+function hasYarn() {
+	try {
+		execFileSync("yarn", ["--version"], { stdio: "ignore", shell: true })
+		return true
+	} catch {
+		return false
+	}
+}
+
 function yarnBuild(reactRepoPath, onLine, onProgress) {
-	return runCommand("yarn", ["build"], reactRepoPath, onLine, YARN_BUILD_MILESTONES, onProgress)
+	if (hasYarn()) {
+		return runCommand("yarn", ["build"], reactRepoPath, onLine, YARN_BUILD_MILESTONES, onProgress)
+	}
+	onLine("\n[INFO] yarn not found on this machine — building with npm instead.\n")
+	return runCommand("npm", ["run", "build"], reactRepoPath, onLine, YARN_BUILD_MILESTONES, onProgress)
 }
 
 const DOTNET_PUBLISH_MILESTONES = [

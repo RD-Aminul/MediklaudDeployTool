@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, Menu, shell } = require("electron")
 const path = require("path")
 const fs = require("fs")
 
-const { applyPatchRules } = require("./src/patcher")
+const { applyPatchRules, snapshotFiles, restoreFiles } = require("./src/patcher")
 const {
 	gitPull,
 	yarnBuild,
@@ -71,6 +71,7 @@ function createWindow() {
 	mainWindow = new BrowserWindow({
 		width: 980,
 		height: 760,
+		icon: path.join(__dirname, "img", "logo.png"),
 		webPreferences: {
 			preload: path.join(__dirname, "preload.js"),
 			contextIsolation: true,
@@ -258,6 +259,19 @@ ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, st
 		}
 	}
 
+	// The patch step needs the target environment's values in place only long
+	// enough to build against them — the developer's working copy shouldn't be
+	// left sitting on whatever environment was last deployed. Captured right
+	// before patching, written back once the build that used it is done (or the
+	// pipeline fails partway through, so a broken build never leaves the repo
+	// patched either).
+	let patchSnapshot = null
+	const restorePatchedFiles = () => {
+		if (!patchSnapshot) return
+		restoreFiles(patchSnapshot, sendLog)
+		patchSnapshot = null
+	}
+
 	try {
 		if (steps.gitPull) {
 			sendStep("gitPull", "running")
@@ -284,6 +298,7 @@ ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, st
 				...r,
 				file: path.join(repoPath(r.repo), r.file),
 			}))
+			patchSnapshot = snapshotFiles(rules)
 			applyPatchRules(rules, env.values, sendLog)
 
 			sendProgress("patch", 100)
@@ -364,6 +379,11 @@ ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, st
 			// keeps it out of the archive, so a deployed copy never starts offline.
 			await restoreApp()
 
+			// The build already used the patched values (baked into the dotnet publish
+			// output and the copied React build folder above), so the source files can
+			// go back to how they were before this run touched them.
+			restorePatchedFiles()
+
 			sendProgress("build", 100)
 			sendStep("build", "done")
 		}
@@ -407,6 +427,10 @@ ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, st
 		} catch (cleanupErr) {
 			sendLog(`\n[WARN] could not bring the app back up: ${cleanupErr.message}\n`)
 		}
+		// Same for the patched source files — but only when this run actually
+		// meant to build (patch-only runs are expected to leave the patch in
+		// place, e.g. to build manually afterward).
+		if (steps.build) restorePatchedFiles()
 		sendLog(`\n[ERROR] ${err.message}\n`)
 		sendStep("error", err.message)
 		throw err
