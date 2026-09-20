@@ -186,17 +186,25 @@ ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, st
 	if (!baseEnv) throw new Error(`Unknown environment: ${envKey}`)
 
 	// Some environments (e.g. Global's per-client presets) offer more than one
-	// connection-string/API-URL pairing — Test vs. Live, or a couple of Live
-	// candidates that were never fully reconciled. "variants" holds those; the
-	// chosen one's values/runtimeIdentifier override the environment's own.
+	// deployment under a single name — Test vs. Live and so on. "variants" holds
+	// those, and a variant owns its whole deployment: not just the connection
+	// string and API URL but where it publishes, what it archives to, and which
+	// IIS site it stops. Anything a variant leaves unset falls back to the
+	// environment, so config that still keeps those at environment level keeps
+	// resolving the same way.
 	let env = baseEnv
 	if (baseEnv.variants) {
 		const variant = baseEnv.variants[variantKey]
 		if (!variant) throw new Error(`Environment "${envKey}" has no variant "${variantKey}"`)
+		const inherit = field => (variant[field] !== undefined ? variant[field] : baseEnv[field])
 		env = {
 			...baseEnv,
 			label: `${baseEnv.label} — ${variant.label}`,
-			runtimeIdentifier: variant.runtimeIdentifier !== undefined ? variant.runtimeIdentifier : baseEnv.runtimeIdentifier,
+			publishDir: inherit("publishDir"),
+			archiveName: inherit("archiveName"),
+			runtimeIdentifier: inherit("runtimeIdentifier"),
+			iisSiteName: inherit("iisSiteName"),
+			iisAppPool: inherit("iisAppPool"),
 			values: variant.values,
 		}
 	}

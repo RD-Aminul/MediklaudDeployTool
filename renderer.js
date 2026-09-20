@@ -36,8 +36,40 @@ const addEnvBtn = document.getElementById("addEnvBtn")
 const removeEnvBtn = document.getElementById("removeEnvBtn")
 const addVariantBtn = document.getElementById("addVariantBtn")
 const removeVariantBtn = document.getElementById("removeVariantBtn")
+const askModal = document.getElementById("askModal")
+const askModalMessage = document.getElementById("askModalMessage")
+const askModalInput = document.getElementById("askModalInput")
+const askModalOk = document.getElementById("askModalOk")
+const askModalCancel = document.getElementById("askModalCancel")
 
 const STEPS = ["gitPull", "patch", "build", "zip"]
+
+// Electron does not implement window.prompt() — it returns null without ever
+// showing anything, which is why the Add buttons appeared to do nothing. This
+// is the stand-in: same contract (text, or null when cancelled).
+function askText(message) {
+	return new Promise(resolve => {
+		askModalMessage.textContent = message
+		askModalInput.value = ""
+		askModal.hidden = false
+		askModalInput.focus()
+
+		const close = value => {
+			askModal.hidden = true
+			askModalOk.onclick = null
+			askModalCancel.onclick = null
+			askModalInput.onkeydown = null
+			resolve(value)
+		}
+
+		askModalOk.onclick = () => close(askModalInput.value)
+		askModalCancel.onclick = () => close(null)
+		askModalInput.onkeydown = event => {
+			if (event.key === "Enter") close(askModalInput.value)
+			else if (event.key === "Escape") close(null)
+		}
+	})
+}
 
 /* ---------------- tabs ---------------- */
 
@@ -180,17 +212,21 @@ function renderDestInfo() {
 	if (env.variants && !currentVariant()) return // variant list still populating
 
 	const variant = currentVariant()
-	const publishDir = (env.publishDir || "").trim()
-	const archiveName = (env.archiveName || "").trim()
-	const rid = ((variant && variant.runtimeIdentifier !== undefined ? variant.runtimeIdentifier : env.runtimeIdentifier) || "").trim()
+	// A variant owns its whole deployment (publish path, archive, IIS, runtime),
+	// not just its connection values — fall back to the environment only for
+	// whatever a variant leaves unset.
+	const inherit = field => (variant && variant[field] !== undefined ? variant[field] : env[field])
+	const publishDir = (inherit("publishDir") || "").trim()
+	const archiveName = (inherit("archiveName") || "").trim()
+	const rid = (inherit("runtimeIdentifier") || "").trim()
 	const folders = project.artifacts.map(a => a.folder).join(", ")
 
 	const target = publishDir || `${config.tools.outputRoot}\\<timestamp>`
 	const lines = [`<div><span class="dk">Publishes to</span>${escapeHtml(target)}\\{${escapeHtml(folders)}}</div>`]
 
 	if (publishDir) {
-		const site = (env.iisSiteName || "").trim()
-		const pool = (env.iisAppPool || "").trim()
+		const site = (inherit("iisSiteName") || "").trim()
+		const pool = (inherit("iisAppPool") || "").trim()
 		if (site || pool) {
 			const what = [site && `site "${site}"`, pool && `pool "${pool}"`].filter(Boolean).join(" + ")
 			lines.push(`<div><span class="dk">IIS</span>stops ${escapeHtml(what)}, starts it again after</div>`)
@@ -384,6 +420,22 @@ function renderPresetEditor() {
 					})
 					.join("")
 
+			// A variant owns its whole deployment, not just its connection values —
+			// publish path, archive name, runtime, and IIS target are each edited per
+			// variant too. A field left blank on the variant still falls back to the
+			// environment's value at deploy time (see main.js/renderDestInfo); showing
+			// that inherited value here as the starting default (rather than a blank
+			// box) makes that fallback visible instead of looking unset.
+			const envFieldsHtml = (target, variantKey) =>
+				ENV_FIELDS.map(([field, label]) => {
+					const variantAttr = variantKey ? ` data-variant="${escapeHtml(variantKey)}"` : ""
+					const value = target[field] !== undefined && target[field] !== "" ? target[field] : env[field]
+					return `
+						<label>${escapeHtml(label)}</label>
+						<input type="text" data-proj="${projKey}" data-env="${envKey}"${variantAttr} data-field="${field}"
+						       value="${escapeHtml(value)}" />`
+				}).join("")
+
 			const variantsHtml = env.variants
 				? variantEntries
 						.map(
@@ -391,24 +443,16 @@ function renderPresetEditor() {
 								<div class="variant-block">
 									<h5>${escapeHtml(variant.label)}</h5>
 									${valueFieldsHtml(variant.values, variantKey)}
+									${envFieldsHtml(variant, variantKey)}
 								</div>`
 						)
 						.join("")
-				: valueFieldsHtml(env.values)
-
-			const envFields = ENV_FIELDS.map(
-				([field, label]) => `
-					<label>${escapeHtml(label)}</label>
-					<input type="text" data-proj="${projKey}" data-env="${envKey}" data-field="${field}"
-					       value="${escapeHtml(env[field])}" />`
-			).join("")
+				: valueFieldsHtml(env.values) + envFieldsHtml(env)
 
 			card.innerHTML = `
 				<h4>${escapeHtml(env.label)}</h4>
 				<div class="field-note">${escapeHtml(env.note)}</div>
 				${variantsHtml}
-				${env.variants ? '<div class="env-fields-head">Shared for all variants</div>' : ""}
-				${envFields}
 			`
 			presetEditor.appendChild(card)
 		})
@@ -654,12 +698,14 @@ function renderManageVariant(forceKey) {
 		if (previous && env.variants[previous]) manageVariantSelect.value = previous
 	}
 
-	addVariantBtn.disabled = !env || !env.variants
+	// An environment with no variants yet can still get its first one — adding
+	// converts it (see the add handler), so this only needs an environment.
+	addVariantBtn.disabled = !env
 	removeVariantBtn.disabled = variantEntries.length <= 1
 }
 
 addProjectBtn.addEventListener("click", async () => {
-	const label = window.prompt('New project name (e.g. "Sunrise Hospital"):')
+	const label = await askText('New project name (e.g. "Sunrise Hospital"):')
 	if (!label || !label.trim()) return
 	const key = uniqueKey(slugify(label), config.projects)
 
@@ -696,7 +742,7 @@ removeProjectBtn.addEventListener("click", async () => {
 addEnvBtn.addEventListener("click", async () => {
 	const project = currentManageProject()
 	if (!project) return
-	const label = window.prompt(`New environment name for ${project.label} (e.g. "Test Server"):`)
+	const label = await askText(`New environment name for ${project.label} (e.g. "Test Server"):`)
 	if (!label || !label.trim()) return
 	const key = uniqueKey(slugify(label), project.environments)
 
@@ -738,11 +784,21 @@ removeEnvBtn.addEventListener("click", async () => {
 addVariantBtn.addEventListener("click", async () => {
 	const project = currentManageProject()
 	const env = currentManageEnv()
-	if (!project || !env || !env.variants) return
-	const label = window.prompt(`New variant name for "${env.label}" (e.g. "Test"):`)
+	if (!project || !env) return
+	const label = await askText(`New variant name for "${env.label}" (e.g. "Test"):`)
 	if (!label || !label.trim()) return
-	const key = uniqueKey(slugify(label), env.variants)
 
+	// An environment that still holds one flat set of values has to become a
+	// variants one before it can hold a second. Its existing values move into a
+	// "Default" variant rather than being dropped, so it keeps working as before.
+	if (!env.variants) {
+		env.variants = {
+			default: { label: "Default", values: env.values || blankValues(fieldsForProject(project)) },
+		}
+		delete env.values
+	}
+
+	const key = uniqueKey(slugify(label), env.variants)
 	env.variants[key] = { label: label.trim(), values: blankValues(fieldsForProject(project)) }
 
 	await window.api.saveConfig(config)
