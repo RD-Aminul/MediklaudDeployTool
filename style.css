@@ -6,6 +6,7 @@
 	--text: #e6e9ef;
 	--muted: #8b95a5;
 	--accent: #4f8cff;
+	--accent-2: #8b5cf6;
 	--accent-soft: rgba(79, 140, 255, 0.14);
 	--green: #2fbf71;
 	--green-soft: rgba(47, 191, 113, 0.14);
@@ -15,6 +16,7 @@
 	--yellow-soft: rgba(232, 179, 57, 0.1);
 	--radius: 12px;
 	--shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.22);
+	--ease: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 * { box-sizing: border-box; }
@@ -25,6 +27,7 @@ body {
 	background: var(--bg);
 	color: var(--text);
 	overflow: hidden; /* the sidebar and content-area scroll independently */
+	-webkit-font-smoothing: antialiased;
 }
 
 /* ---------- app shell / sidebar ---------- */
@@ -32,15 +35,34 @@ body {
 .app-shell {
 	display: flex;
 	height: 100vh;
+	/* A faint glow bleeding in from the top corners gives the whole window some
+	   depth instead of one flat black plane. */
+	background:
+		radial-gradient(900px 500px at -10% -10%, rgba(79, 140, 255, 0.08), transparent 60%),
+		radial-gradient(700px 500px at 110% 0%, rgba(139, 92, 246, 0.06), transparent 60%),
+		var(--bg);
 }
 
 .sidebar {
 	flex: 0 0 220px;
 	display: flex;
 	flex-direction: column;
-	background: var(--panel);
+	background: linear-gradient(180deg, #171d29, #10141c);
 	border-right: 1px solid var(--border);
 	padding: 18px 14px;
+	position: relative;
+}
+/* A thin accent seam on the sidebar's outer edge — a small signature touch
+   that shows up in every screen instead of just on the active tab. */
+.sidebar::after {
+	content: "";
+	position: absolute;
+	top: 0;
+	right: -1px;
+	width: 1px;
+	height: 100%;
+	background: linear-gradient(180deg, var(--accent), transparent 60%);
+	opacity: 0.5;
 }
 
 .sidebar-brand {
@@ -51,10 +73,23 @@ body {
 	margin-bottom: 8px;
 	border-bottom: 1px solid var(--border);
 }
-.app-logo { width: 32px; height: 32px; flex-shrink: 0; }
+.app-logo {
+	width: 34px;
+	height: 34px;
+	flex-shrink: 0;
+	filter: drop-shadow(0 0 10px rgba(79, 140, 255, 0.45));
+}
 .brand-text { min-width: 0; }
-.brand-title { font-size: 14px; font-weight: 700; line-height: 1.2; }
-.brand-sub { font-size: 11px; color: var(--muted); line-height: 1.3; }
+.brand-title {
+	font-size: 14.5px;
+	font-weight: 800;
+	line-height: 1.2;
+	background: linear-gradient(90deg, #fff, #b9c6e0);
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+}
+.brand-sub { font-size: 11px; color: var(--muted); line-height: 1.3; letter-spacing: 0.02em; }
 
 .tabs { display: flex; flex-direction: column; gap: 4px; }
 
@@ -72,13 +107,20 @@ body {
 	text-align: left;
 	cursor: pointer;
 	margin: 0;
-	transition: background 0.15s ease, color 0.15s ease;
+	position: relative;
+	transition: background 0.2s var(--ease), color 0.2s var(--ease), transform 0.2s var(--ease);
 }
-.tab-icon { font-size: 15px; line-height: 1; }
-.tab:hover { color: var(--text); background: rgba(255, 255, 255, 0.04); }
+.tab-icon { font-size: 15px; line-height: 1; transition: transform 0.2s var(--ease); }
+.tab:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); transform: translateX(2px); }
+.tab:hover .tab-icon { transform: scale(1.15); }
 .tab:focus { outline: none; }
 .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.tab.active { color: var(--text); background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); font-weight: 600; }
+.tab.active {
+	color: white;
+	background: linear-gradient(90deg, var(--accent-soft), rgba(79, 140, 255, 0.02));
+	box-shadow: inset 3px 0 0 var(--accent), 0 0 20px -6px var(--accent);
+	font-weight: 700;
+}
 
 .sidebar-footer { margin-top: auto; padding-top: 14px; }
 .credit-line { font-size: 10.5px; color: var(--muted); line-height: 1.5; }
@@ -100,7 +142,11 @@ main {
 }
 
 .tab-page { display: none; }
-.tab-page.active { display: grid; gap: 18px; }
+.tab-page.active { display: grid; gap: 18px; animation: tabIn 0.3s var(--ease); }
+@keyframes tabIn {
+	from { opacity: 0; transform: translateY(8px); }
+	to { opacity: 1; transform: translateY(0); }
+}
 
 .app-footer {
 	max-width: 880px;
@@ -119,7 +165,9 @@ main {
 	border-radius: var(--radius);
 	padding: 20px 22px;
 	box-shadow: var(--shadow);
+	transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
+.panel:hover { border-color: #38415a; }
 
 .panel h2 {
 	margin: 0 0 16px;
@@ -128,6 +176,16 @@ main {
 	text-transform: uppercase;
 	letter-spacing: 0.06em;
 	font-weight: 700;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+.panel h2::before {
+	content: "";
+	width: 4px;
+	height: 14px;
+	border-radius: 2px;
+	background: linear-gradient(180deg, var(--accent), var(--accent-2));
 }
 
 label { display: block; font-size: 13px; margin: 12px 0 5px; color: var(--muted); }
@@ -152,6 +210,7 @@ select {
 	padding-right: 30px;
 }
 select:disabled { opacity: 0.45; cursor: not-allowed; }
+select:hover, input[type="text"]:hover { border-color: #3d4867; }
 select:focus, input[type="text"]:focus {
 	outline: none;
 	border-color: var(--accent);
@@ -165,8 +224,9 @@ select:focus, input[type="text"]:focus {
 	font-size: 12px;
 	color: var(--text);
 	background: var(--yellow-soft);
-	border: 1px solid rgba(232, 179, 57, 0.35);
-	border-radius: 8px;
+	border: 1px solid transparent;
+	border-left: 3px solid var(--yellow);
+	border-radius: 6px;
 	padding: 10px 12px;
 	margin: 0 0 16px;
 }
@@ -215,26 +275,43 @@ button {
 	color: var(--text);
 	border: none;
 	padding: 10px 20px;
-	border-radius: 8px;
+	border-radius: 9px;
 	font-size: 13.5px;
 	font-family: inherit;
 	font-weight: 600;
 	cursor: pointer;
-	transition: filter 0.15s ease, transform 0.05s ease;
+	transition: filter 0.15s var(--ease), transform 0.15s var(--ease), box-shadow 0.2s var(--ease);
 }
-button:hover { filter: brightness(1.2); }
-button:active { transform: translateY(1px); }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
+button:hover { filter: brightness(1.2); transform: translateY(-1px); }
+button:active { transform: translateY(0); filter: brightness(1.05); }
+button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
 .primary-btn {
-	background: linear-gradient(135deg, var(--accent), #3866d6);
+	background: linear-gradient(135deg, var(--accent), var(--accent-2));
+	background-size: 160% 160%;
+	background-position: 0% 50%;
 	color: white;
-	box-shadow: 0 4px 14px rgba(79, 140, 255, 0.35);
+	box-shadow: 0 4px 18px rgba(79, 140, 255, 0.4);
+	transition: filter 0.15s var(--ease), transform 0.15s var(--ease), box-shadow 0.2s var(--ease), background-position 0.35s var(--ease);
+}
+.primary-btn:hover {
+	background-position: 100% 50%;
+	box-shadow: 0 6px 26px rgba(79, 140, 255, 0.55);
 }
 .secondary-btn { background: var(--panel-2); border: 1px solid var(--border); }
 
 .action-row { display: flex; align-items: center; }
-.stop-btn { background: var(--red); color: white; margin-left: 10px; }
+.stop-btn {
+	background: linear-gradient(135deg, var(--red), #c62839);
+	color: white;
+	margin-left: 10px;
+	box-shadow: 0 4px 16px rgba(239, 75, 75, 0.35);
+	animation: popIn 0.2s var(--ease);
+}
+@keyframes popIn {
+	from { opacity: 0; transform: scale(0.85); }
+	to { opacity: 1; transform: scale(1); }
+}
 
 /* ---------- vertical stepper / progress ---------- */
 
@@ -293,41 +370,65 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 	transition: width 0.4s ease;
 }
 
+/* pending markers get a faint glow too, so the whole stepper feels alive
+   rather than only lighting up once something starts. */
+.step-marker { position: relative; box-shadow: 0 0 0 0 transparent; }
+
 /* running */
 .progress-row.running .step-marker {
 	border-color: var(--accent);
 	color: var(--accent);
-	box-shadow: 0 0 0 4px var(--accent-soft);
+	background: radial-gradient(circle, rgba(79, 140, 255, 0.25), transparent 70%);
+	box-shadow: 0 0 0 5px var(--accent-soft), 0 0 18px -2px var(--accent);
+	animation: pulseGlow 1.6s ease-in-out infinite;
 }
 .progress-row.running .step-marker::before {
 	content: "";
 	position: absolute;
-	top: 0;
-	left: 0;
+	top: -2px;
+	left: -2px;
 	width: 26px;
 	height: 26px;
 	border-radius: 50%;
 	border: 2px solid transparent;
 	border-top-color: var(--accent);
-	animation: spin 0.9s linear infinite;
+	border-right-color: var(--accent-2);
+	animation: spin 0.8s linear infinite;
 }
-.step-marker { position: relative; }
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulseGlow {
+	0%, 100% { box-shadow: 0 0 0 5px var(--accent-soft), 0 0 18px -2px var(--accent); }
+	50% { box-shadow: 0 0 0 7px var(--accent-soft), 0 0 26px 2px var(--accent); }
+}
 
 /* done */
-.progress-row.done .step-marker { border-color: var(--green); background: var(--green); }
+.progress-row.done .step-marker {
+	border-color: var(--green);
+	background: linear-gradient(135deg, var(--green), #1f9c5a);
+	box-shadow: 0 0 14px -2px rgba(47, 191, 113, 0.7);
+}
 .progress-row.done .step-num { font-size: 0; }
 .progress-row.done .step-num::after { content: "✓"; font-size: 13px; color: white; }
-.progress-row.done .step-line { background: var(--green); }
-.progress-row.done .progress-value { color: var(--green); }
-.progress-row.done .progress-fill { background: var(--green); }
+.progress-row.done .step-line { background: linear-gradient(180deg, var(--green), var(--border)); }
+.progress-row.done .progress-value { color: var(--green); font-weight: 700; }
+.progress-row.done .progress-fill { background: linear-gradient(90deg, var(--green), #4fe08f); }
 
 /* error */
-.progress-row.error .step-marker { border-color: var(--red); background: var(--red); }
+.progress-row.error .step-marker {
+	border-color: var(--red);
+	background: linear-gradient(135deg, var(--red), #b8232f);
+	box-shadow: 0 0 14px -2px rgba(239, 75, 75, 0.7);
+	animation: shake 0.4s var(--ease);
+}
 .progress-row.error .step-num { font-size: 0; }
 .progress-row.error .step-num::after { content: "✕"; font-size: 12px; color: white; }
-.progress-row.error .progress-value { color: var(--red); }
+.progress-row.error .progress-value { color: var(--red); font-weight: 700; }
 .progress-row.error .progress-fill { background: var(--red); }
+@keyframes shake {
+	0%, 100% { transform: translateX(0); }
+	25% { transform: translateX(-3px); }
+	75% { transform: translateX(3px); }
+}
 
 .progress-row.skipped { opacity: 0.4; }
 
@@ -389,7 +490,9 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 	border-radius: 10px;
 	padding: 16px;
 	margin-bottom: 14px;
+	transition: border-color 0.2s var(--ease), transform 0.2s var(--ease);
 }
+.preset-card:hover { border-color: var(--accent); transform: translateY(-1px); }
 .preset-card h3 { margin: 0 0 8px; font-size: 14px; }
 .preset-card h4 { margin: 0 0 6px; font-size: 14px; }
 
