@@ -145,4 +145,34 @@ function applyPatchRules(rules, values, onLine) {
 	}
 }
 
-module.exports = { applyPatchRules, toggleActiveLine, setEnvValue, buildRegex }
+// Reads every file a set of patch rules touches, before any of them are
+// patched, so the working tree can be put back exactly as it was found once
+// the build that needed the patched values is done. Keyed by absolute path
+// since DCCI's rules, for instance, patch two different keys in one shared
+// appsettings.json — that file must only be captured (and restored) once.
+function snapshotFiles(rules) {
+	const snapshot = new Map()
+	for (const rule of rules) {
+		if (!snapshot.has(rule.file) && fs.existsSync(rule.file)) {
+			snapshot.set(rule.file, fs.readFileSync(rule.file, "utf8"))
+		}
+	}
+	return snapshot
+}
+
+// Writes every captured file back to its pre-patch content. Best-effort per
+// file — one unwritable file (e.g. locked by an editor) must not stop the
+// others from being restored, and the caller (main.js) treats this as cleanup
+// that should never itself fail the pipeline.
+function restoreFiles(snapshot, onLine) {
+	for (const [file, original] of snapshot) {
+		try {
+			fs.writeFileSync(file, original, "utf8")
+			onLine(`\nRestored ${file} to its pre-patch content\n`)
+		} catch (err) {
+			onLine(`\n[WARN] could not restore ${file} — ${err.message}\n`)
+		}
+	}
+}
+
+module.exports = { applyPatchRules, toggleActiveLine, setEnvValue, buildRegex, snapshotFiles, restoreFiles }

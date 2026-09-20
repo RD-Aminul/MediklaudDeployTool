@@ -121,7 +121,30 @@ var require_patcher = __commonJS({
 `);
       }
     }
-    module2.exports = { applyPatchRules: applyPatchRules2, toggleActiveLine, setEnvValue, buildRegex };
+    function snapshotFiles2(rules) {
+      const snapshot = /* @__PURE__ */ new Map();
+      for (const rule of rules) {
+        if (!snapshot.has(rule.file) && fs2.existsSync(rule.file)) {
+          snapshot.set(rule.file, fs2.readFileSync(rule.file, "utf8"));
+        }
+      }
+      return snapshot;
+    }
+    function restoreFiles2(snapshot, onLine) {
+      for (const [file, original] of snapshot) {
+        try {
+          fs2.writeFileSync(file, original, "utf8");
+          onLine(`
+Restored ${file} to its pre-patch content
+`);
+        } catch (err) {
+          onLine(`
+[WARN] could not restore ${file} \u2014 ${err.message}
+`);
+        }
+      }
+    }
+    module2.exports = { applyPatchRules: applyPatchRules2, toggleActiveLine, setEnvValue, buildRegex, snapshotFiles: snapshotFiles2, restoreFiles: restoreFiles2 };
   }
 });
 
@@ -25810,8 +25833,20 @@ $ ${command} ${args.join(" ")}   (cwd: ${cwd})
       { re: /Compiled successfully|Compiled with warnings|Treating warnings/i, percent: 75 },
       { re: /File sizes after gzip/i, percent: 90 }
     ];
+    function hasYarn() {
+      try {
+        execFileSync("yarn", ["--version"], { stdio: "ignore", shell: true });
+        return true;
+      } catch {
+        return false;
+      }
+    }
     function yarnBuild2(reactRepoPath, onLine, onProgress) {
-      return runCommand("yarn", ["build"], reactRepoPath, onLine, YARN_BUILD_MILESTONES, onProgress);
+      if (hasYarn()) {
+        return runCommand("yarn", ["build"], reactRepoPath, onLine, YARN_BUILD_MILESTONES, onProgress);
+      }
+      onLine("\n[INFO] yarn not found on this machine \u2014 building with npm instead.\n");
+      return runCommand("npm", ["run", "build"], reactRepoPath, onLine, YARN_BUILD_MILESTONES, onProgress);
     }
     var DOTNET_PUBLISH_MILESTONES = [
       { re: /Determining projects to restore/i, percent: 8 },
@@ -26166,7 +26201,7 @@ var require_pathDetector = __commonJS({
 var { app, BrowserWindow, ipcMain, Menu, shell } = require("electron");
 var path = require("path");
 var fs = require("fs");
-var { applyPatchRules } = require_patcher();
+var { applyPatchRules, snapshotFiles, restoreFiles } = require_patcher();
 var {
   gitPull,
   yarnBuild,
@@ -26216,6 +26251,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 980,
     height: 760,
+    icon: path.join(__dirname, "img", "logo.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true
@@ -26351,6 +26387,12 @@ ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, st
       bringAppOnline(outDirOf(apiArtifact), sendLog);
     }
   };
+  let patchSnapshot = null;
+  const restorePatchedFiles = () => {
+    if (!patchSnapshot) return;
+    restoreFiles(patchSnapshot, sendLog);
+    patchSnapshot = null;
+  };
   try {
     if (steps.gitPull) {
       sendStep("gitPull", "running");
@@ -26377,6 +26419,7 @@ Patching ${project.label} for "${env.label}"
         ...r,
         file: path.join(repoPath(r.repo), r.file)
       }));
+      patchSnapshot = snapshotFiles(rules);
       applyPatchRules(rules, env.values, sendLog);
       sendProgress("patch", 100);
       sendStep("patch", "done");
@@ -26435,6 +26478,7 @@ Copied ${a.id} build -> ${outDir}
         sendProgress("build", to);
       }
       await restoreApp();
+      restorePatchedFiles();
       sendProgress("build", 100);
       sendStep("build", "done");
     }
@@ -26474,6 +26518,7 @@ No archive for "${env.label}" \u2014 files published directly to ${runDir}
 [WARN] could not bring the app back up: ${cleanupErr.message}
 `);
     }
+    if (steps.build) restorePatchedFiles();
     sendLog(`
 [ERROR] ${err.message}
 `);
