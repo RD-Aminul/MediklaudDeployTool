@@ -1,7 +1,7 @@
 {
   "name": "mediklaud-deploy-tool",
   "version": "1.0.0",
-  "description": "DCCI Mediklaud ERP build & deploy automation tool",
+  "description": "Build & deploy automation tool for Mediklaud's ERP projects (DCCI, Global, Jail, Pharmacy)",
   "main": "main.bundled.js",
   "scripts": {
     "build:main": "esbuild main.js --bundle --platform=node --target=node20 --external:electron --outfile=main.bundled.js",

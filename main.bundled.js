@@ -25808,18 +25808,16 @@ $ ${command} ${args.join(" ")}   (cwd: ${cwd})
       });
     }
     function gitPull2(repoPath, branch, onLine, onProgress) {
-      return runCommand("git", ["reset", "--hard"], repoPath, onLine, null, null).then(
-        () => runCommand(
-          "git",
-          ["pull", "origin", branch],
-          repoPath,
-          onLine,
-          [
-            { re: /remote:|Receiving objects|Unpacking/i, percent: 40 },
-            { re: /Resolving deltas|Fast-forward|files? changed|Already up to date/i, percent: 80 }
-          ],
-          onProgress
-        )
+      return runCommand(
+        "git",
+        ["pull", "origin", branch],
+        repoPath,
+        onLine,
+        [
+          { re: /remote:|Receiving objects|Unpacking/i, percent: 40 },
+          { re: /Resolving deltas|Fast-forward|files? changed|Already up to date/i, percent: 80 }
+        ],
+        onProgress
       ).then(
         () => runCommand("git", ["push", "origin", "HEAD"], repoPath, onLine, null, null).catch((err) => {
           onLine(`
