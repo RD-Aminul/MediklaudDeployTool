@@ -106,25 +106,30 @@ function runCommand(command, args, cwd, onLine, milestones, onProgress, rawScann
 // failure (no permission, network, diverged remote, etc.) is logged but must not
 // block the rest of the deploy.
 function gitPull(repoPath, branch, onLine, onProgress) {
-	return runCommand("git", ["reset", "--hard"], repoPath, onLine, null, null)
-		.then(() =>
-			runCommand(
-				"git",
-				["pull", "origin", branch],
-				repoPath,
-				onLine,
-				[
-					{ re: /remote:|Receiving objects|Unpacking/i, percent: 40 },
-					{ re: /Resolving deltas|Fast-forward|files? changed|Already up to date/i, percent: 80 },
-				],
-				onProgress
-			)
-		)
-		.then(() =>
-			runCommand("git", ["push", "origin", "HEAD"], repoPath, onLine, null, null).catch(err => {
-				onLine(`\n[WARN] Could not push local branch back to origin — ${err.message}\n`)
-			})
-		)
+	// No "git reset --hard" here on purpose — that used to run before the pull
+	// to clear out the patch step's own leftover uncommitted edits, but it also
+	// silently destroyed any real, unrelated work-in-progress a developer had
+	// sitting in the same repo. Now that the patch step's changes get restored
+	// right after the build that used them (see restorePatchedFiles in
+	// main.js), the working tree is normally already clean going into the next
+	// pull. If real local changes DO conflict with what's being pulled, git
+	// itself refuses the merge and this step fails loudly — which is correct:
+	// the developer's changes must never be discarded without them knowing.
+	return runCommand(
+		"git",
+		["pull", "origin", branch],
+		repoPath,
+		onLine,
+		[
+			{ re: /remote:|Receiving objects|Unpacking/i, percent: 40 },
+			{ re: /Resolving deltas|Fast-forward|files? changed|Already up to date/i, percent: 80 },
+		],
+		onProgress
+	).then(() =>
+		runCommand("git", ["push", "origin", "HEAD"], repoPath, onLine, null, null).catch(err => {
+			onLine(`\n[WARN] Could not push local branch back to origin — ${err.message}\n`)
+		})
+	)
 }
 
 const YARN_BUILD_MILESTONES = [
