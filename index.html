@@ -80,8 +80,10 @@
 					<div class="progress-track"><div class="progress-fill"></div></div>
 				</div>
 
-				<div id="resultBox" class="result"></div>
-				<button id="openFolderBtn" class="link-btn" hidden>Open output folder</button>
+				<div class="result-row">
+					<div id="resultBox" class="result"></div>
+					<button id="openFolderBtn" class="open-folder-btn" hidden>Output Folder</button>
+				</div>
 
 				<button id="toggleLogBtn" class="link-btn">Show technical details</button>
 				<pre id="log" hidden></pre>
@@ -153,6 +155,18 @@
 			</div>
 		</section>
 	</main>
+
+	<!-- Electron disables window.prompt(), so text input asks go through this. -->
+	<div id="askModal" class="modal-overlay" hidden>
+		<div class="modal">
+			<div id="askModalMessage" class="modal-message"></div>
+			<input type="text" id="askModalInput" />
+			<div class="modal-actions">
+				<button type="button" id="askModalCancel" class="small-btn">Cancel</button>
+				<button type="button" id="askModalOk" class="small-btn">OK</button>
+			</div>
+		</div>
+	</div>
 
 	<script src="renderer.js"></script>
 </body>

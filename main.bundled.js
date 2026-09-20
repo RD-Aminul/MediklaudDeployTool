@@ -26304,10 +26304,15 @@ ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, st
   if (baseEnv.variants) {
     const variant = baseEnv.variants[variantKey];
     if (!variant) throw new Error(`Environment "${envKey}" has no variant "${variantKey}"`);
+    const inherit = (field) => variant[field] !== void 0 ? variant[field] : baseEnv[field];
     env = {
       ...baseEnv,
       label: `${baseEnv.label} \u2014 ${variant.label}`,
-      runtimeIdentifier: variant.runtimeIdentifier !== void 0 ? variant.runtimeIdentifier : baseEnv.runtimeIdentifier,
+      publishDir: inherit("publishDir"),
+      archiveName: inherit("archiveName"),
+      runtimeIdentifier: inherit("runtimeIdentifier"),
+      iisSiteName: inherit("iisSiteName"),
+      iisAppPool: inherit("iisAppPool"),
       values: variant.values
     };
   }
