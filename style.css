@@ -29,7 +29,8 @@ header {
 	background: var(--bg);
 }
 
-header h1 { font-size: 18px; margin: 0 0 14px; }
+header h1 { font-size: 18px; margin: 0 0 4px; }
+.credit-line { font-size: 11px; color: var(--accent); font-weight: 600; letter-spacing: 0.02em; margin-bottom: 14px; }
 
 .tabs { display: flex; gap: 4px; }
 
@@ -55,6 +56,18 @@ main {
 
 .tab-page { display: none; }
 .tab-page.active { display: grid; gap: 20px; }
+
+.app-footer {
+	max-width: 900px;
+	margin: 0 auto;
+	padding: 4px 24px 24px;
+	text-align: center;
+	font-size: 11px;
+	color: var(--accent);
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	line-height: 1.6;
+}
 
 .panel {
 	background: var(--panel);
