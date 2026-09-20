@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Deploy tool output (generated artifacts, not source)
+output/
+
+# Secrets - contains live production DB credentials, never commit
+config/environments.json
+
+# Editor / OS
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

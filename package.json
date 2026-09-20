@@ -1,0 +1,49 @@
+{
+  "name": "mediklaud-deploy-tool",
+  "version": "1.0.0",
+  "description": "DCCI Mediklaud ERP build & deploy automation tool",
+  "main": "main.bundled.js",
+  "scripts": {
+    "build:main": "esbuild main.js --bundle --platform=node --target=node20 --external:electron --outfile=main.bundled.js",
+    "start": "npm run build:main && electron .",
+    "dist": "npm run build:main && electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "electron-packager": "^17.1.2",
+    "esbuild": "^0.28.2"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "archiver-utils": "^5.0.2",
+    "zip-stream": "^6.0.1"
+  },
+  "build": {
+    "appId": "com.mediklaud.dccideploytool",
+    "productName": "Mediklaud DCCI Deploy Tool",
+    "files": [
+      "main.bundled.js",
+      "preload.js",
+      "index.html",
+      "style.css",
+      "renderer.js",
+      "config/**/*",
+      "!node_modules/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "requestedExecutionLevel": "requireAdministrator"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Mediklaud DCCI Deploy Tool"
+    },
+    "directories": {
+      "output": "dist"
+    }
+  }
+}

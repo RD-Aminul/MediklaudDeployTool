@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Mediklaud DCCI Deploy Tool</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+	<header>
+		<h1>Mediklaud ERP &mdash; DCCI Build &amp; Deploy Tool</h1>
+		<nav class="tabs">
+			<button class="tab active" data-tab="deploy">Deploy</button>
+			<button class="tab" data-tab="settings">Settings</button>
+			<button class="tab" data-tab="manage">Manage</button>
+		</nav>
+	</header>
+
+	<main>
+		<!-- ===================== DEPLOY TAB ===================== -->
+		<section id="tab-deploy" class="tab-page active">
+			<div class="panel">
+				<label for="projectSelect">Project</label>
+				<select id="projectSelect"></select>
+
+				<div id="envSelectGroup">
+					<label for="presetSelect">Target Environment</label>
+					<select id="presetSelect"></select>
+				</div>
+
+				<div id="variantSelectGroup">
+					<label for="variantSelect">Variant</label>
+					<select id="variantSelect"></select>
+				</div>
+
+				<div id="destInfo" class="dest-info"></div>
+
+				<div class="steps">
+					<label><input type="checkbox" id="stepGitPull" checked /> Git Pull (API + React)</label>
+					<label><input type="checkbox" id="stepPatch" checked /> Patch Connection String / api.js</label>
+					<label><input type="checkbox" id="stepBuild" checked /> Build (dotnet publish + yarn build)</label>
+					<label><input type="checkbox" id="stepZip" checked /> <span id="zipStepLabel">Archive (7-Zip)</span></label>
+				</div>
+
+				<button id="runBtn">Start</button>
+				<button id="stopBtn" class="stop-btn" hidden>Stop</button>
+			</div>
+
+			<div class="panel">
+				<h2>Progress</h2>
+
+				<div class="progress-row" id="row-gitPull">
+					<div class="progress-head">
+						<span class="progress-label">Git Pull (API + React)</span>
+						<span class="progress-value">0%</span>
+					</div>
+					<div class="progress-track"><div class="progress-fill"></div></div>
+				</div>
+
+				<div class="progress-row" id="row-patch">
+					<div class="progress-head">
+						<span class="progress-label">Patch Connection String / api.js</span>
+						<span class="progress-value">0%</span>
+					</div>
+					<div class="progress-track"><div class="progress-fill"></div></div>
+				</div>
+
+				<div class="progress-row" id="row-build">
+					<div class="progress-head">
+						<span class="progress-label">Build (dotnet publish + yarn build)</span>
+						<span class="progress-value">0%</span>
+					</div>
+					<div class="progress-track"><div class="progress-fill"></div></div>
+				</div>
+
+				<div class="progress-row" id="row-zip">
+					<div class="progress-head">
+						<span class="progress-label">Archive (7-Zip)</span>
+						<span class="progress-value">0%</span>
+					</div>
+					<div class="progress-track"><div class="progress-fill"></div></div>
+				</div>
+
+				<div id="resultBox" class="result"></div>
+				<button id="openFolderBtn" class="link-btn" hidden>Open output folder</button>
+
+				<button id="toggleLogBtn" class="link-btn">Show technical details</button>
+				<pre id="log" hidden></pre>
+			</div>
+		</section>
+
+		<!-- ===================== SETTINGS TAB ===================== -->
+		<section id="tab-settings" class="tab-page">
+			<div class="panel">
+				<h2>Environment Presets</h2>
+				<p class="note">These values must exactly match a line that already exists (active or commented) in the target files. If a value is not found, the tool adds it as a new active line.</p>
+
+				<div class="filter-row">
+					<div class="filter-field">
+						<label for="filterProject">Project</label>
+						<select id="filterProject"></select>
+					</div>
+					<div class="filter-field" id="filterEnvGroup">
+						<label for="filterEnv">Environment</label>
+						<select id="filterEnv"></select>
+					</div>
+					<div class="filter-field" id="filterVariantGroup">
+						<label for="filterVariant">Variant</label>
+						<select id="filterVariant"></select>
+					</div>
+				</div>
+
+				<div id="presetEditor"></div>
+				<div id="presetEmpty" class="empty-note" hidden>Nothing matches this filter.</div>
+				<button id="saveConfigBtn">Save Presets</button>
+				<span id="saveStatus"></span>
+			</div>
+
+			<div class="panel">
+				<h2>Paths</h2>
+				<div id="pathsView" class="paths"></div>
+				<button id="detectPathsBtn">Detect Paths</button>
+				<span id="detectStatus"></span>
+				<div id="detectResults" class="detect-results" hidden></div>
+			</div>
+		</section>
+
+		<!-- ===================== MANAGE TAB ===================== -->
+		<section id="tab-manage" class="tab-page">
+			<div class="panel">
+				<h2>Projects, Environments &amp; Variants</h2>
+				<p class="note">Add or remove entries here. Their connection strings / API URLs are edited on the Settings tab.</p>
+
+				<label for="manageProjectSelect">Project</label>
+				<div class="manage-row">
+					<select id="manageProjectSelect"></select>
+					<button type="button" id="addProjectBtn" class="small-btn">+ Add</button>
+					<button type="button" id="removeProjectBtn" class="small-btn danger-btn">Remove</button>
+				</div>
+
+				<label for="manageEnvSelect">Environment</label>
+				<div class="manage-row">
+					<select id="manageEnvSelect"></select>
+					<button type="button" id="addEnvBtn" class="small-btn">+ Add</button>
+					<button type="button" id="removeEnvBtn" class="small-btn danger-btn">Remove</button>
+				</div>
+
+				<label for="manageVariantSelect">Variant</label>
+				<div class="manage-row">
+					<select id="manageVariantSelect"></select>
+					<button type="button" id="addVariantBtn" class="small-btn">+ Add</button>
+					<button type="button" id="removeVariantBtn" class="small-btn danger-btn">Remove</button>
+				</div>
+			</div>
+		</section>
+	</main>
+
+	<script src="renderer.js"></script>
+</body>
+</html>

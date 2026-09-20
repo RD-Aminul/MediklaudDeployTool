@@ -1,0 +1,69 @@
+{
+  "configVersion": 17,
+  "tools": {
+    "sevenZipExe": "C:\\Program Files\\7-Zip\\7z.exe",
+    "appcmdExe": "C:\\Windows\\System32\\inetsrv\\appcmd.exe",
+    "outputRoot": "C:\\path\\to\\MediklaudDeployTool\\output"
+  },
+  "projects": {
+    "example": {
+      "label": "Example Client",
+      "repos": {
+        "api": "E:\\path\\to\\example_api",
+        "react": "E:\\path\\to\\example_react"
+      },
+      "branches": {
+        "api": "master",
+        "react": "main"
+      },
+      "artifacts": [
+        {
+          "id": "api",
+          "repo": "api",
+          "type": "dotnet",
+          "csproj": "Example.Web\\Example.Web.csproj",
+          "folder": "api"
+        },
+        {
+          "id": "react",
+          "repo": "react",
+          "type": "yarn",
+          "buildDir": "build",
+          "folder": "react"
+        }
+      ],
+      "patchRules": [
+        {
+          "repo": "api",
+          "file": "Example.Web\\appsettings.json",
+          "kind": "json",
+          "name": "DefaultConnection",
+          "field": "defaultConnection"
+        },
+        {
+          "repo": "react",
+          "file": "src\\api.js",
+          "kind": "js",
+          "name": "API_BASE_URL",
+          "field": "apiBaseUrl"
+        }
+      ],
+      "environments": {
+        "local": {
+          "label": "Local Development",
+          "note": "Example environment block. Fill in real values in environments.json (gitignored, never commit it).",
+          "publishDir": "E:\\Publish\\Example",
+          "archiveName": "",
+          "runtimeIdentifier": "",
+          "iisSiteName": "Example_ERP",
+          "iisAppPool": "Example_ERP",
+          "values": {
+            "defaultConnection": "Host=<host>;Port=5432;Database=<db>;Username=<user>;Password=<password>;Search Path=<schema>",
+            "apiBaseUrl": "http://<host>/api/api/"
+          }
+        }
+      }
+    }
+  },
+  "autoDetectDone": true
+}
