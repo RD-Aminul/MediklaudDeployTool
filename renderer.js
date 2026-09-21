@@ -5,9 +5,12 @@ const presetSelect = document.getElementById("presetSelect")
 const envSelectGroup = document.getElementById("envSelectGroup")
 const variantSelect = document.getElementById("variantSelect")
 const variantSelectGroup = document.getElementById("variantSelectGroup")
+const componentSelect = document.getElementById("componentSelect")
 const destInfo = document.getElementById("destInfo")
 const zipCheckbox = document.getElementById("stepZip")
 const zipStepLabel = document.getElementById("zipStepLabel")
+const gitPullStepLabel = document.getElementById("gitPullStepLabel")
+const buildStepLabel = document.getElementById("buildStepLabel")
 const runBtn = document.getElementById("runBtn")
 const stopBtn = document.getElementById("stopBtn")
 const logEl = document.getElementById("log")
@@ -36,6 +39,16 @@ const addEnvBtn = document.getElementById("addEnvBtn")
 const removeEnvBtn = document.getElementById("removeEnvBtn")
 const addVariantBtn = document.getElementById("addVariantBtn")
 const removeVariantBtn = document.getElementById("removeVariantBtn")
+const manageStatus = document.getElementById("manageStatus")
+
+// window.alert() is a blocking native dialog — on some window setups it can
+// render behind the app or otherwise fail to grab focus, which then looks
+// like the whole Manage tab has frozen (nothing responds until it's
+// dismissed). This inline notice does the same job without ever blocking.
+function showManageStatus(message) {
+	manageStatus.textContent = message
+	manageStatus.hidden = false
+}
 const askModal = document.getElementById("askModal")
 const askModalMessage = document.getElementById("askModalMessage")
 const askModalInput = document.getElementById("askModalInput")
@@ -47,7 +60,17 @@ const STEPS = ["gitPull", "patch", "build", "zip"]
 // Electron does not implement window.prompt() — it returns null without ever
 // showing anything, which is why the Add buttons appeared to do nothing. This
 // is the stand-in: same contract (text, or null when cancelled).
+// A stray second call while one is already open (a double click, or a click
+// that lands right as the first modal is closing) used to silently overwrite
+// askModalOk/Cancel's onclick, orphaning the first call's promise forever —
+// its "+ Add" button would then look permanently stuck since that await never
+// resolves. Cancelling whatever is already open before starting a new one
+// means there is never more than one pending promise to abandon.
+let closeCurrentAsk = null
+
 function askText(message) {
+	if (closeCurrentAsk) closeCurrentAsk(null)
+
 	return new Promise(resolve => {
 		askModalMessage.textContent = message
 		askModalInput.value = ""
@@ -59,8 +82,10 @@ function askText(message) {
 			askModalOk.onclick = null
 			askModalCancel.onclick = null
 			askModalInput.onkeydown = null
+			closeCurrentAsk = null
 			resolve(value)
 		}
+		closeCurrentAsk = close
 
 		askModalOk.onclick = () => close(askModalInput.value)
 		askModalCancel.onclick = () => close(null)
@@ -205,11 +230,51 @@ function renderVariantSelect() {
 
 // Spells out exactly where this run will write and what it will produce, so the
 // destructive "clear the publish folder" step is never a surprise.
+// "both" (default) / "api" / "react" — react here means every non-dotnet
+// artifact, so Jail's PMS + VMS both count as "react" for this purpose.
+function selectedArtifactsFor(project) {
+	const comp = componentSelect.value
+	if (comp === "api") return project.artifacts.filter(a => a.type === "dotnet")
+	if (comp === "react") return project.artifacts.filter(a => a.type !== "dotnet")
+	return project.artifacts
+}
+
+// Short ids (api, pms, vms) are acronyms and read oddly title-cased, so those
+// go fully upper-case; a longer one like "react" just gets its first letter
+// capitalized.
+function displayIdLabel(id) {
+	return id.length <= 4 ? id.toUpperCase() : id.charAt(0).toUpperCase() + id.slice(1)
+}
+
+// The step checkboxes/progress rows say "Git Pull (API + React)" etc. by
+// default — once a component filter narrows what's actually running, those
+// need to say so too, or the labels visibly disagree with the info box below
+// them.
+function updateStepLabels(project) {
+	const comp = componentSelect.value
+	const dotnetLabels = project.artifacts.filter(a => a.type === "dotnet").map(a => displayIdLabel(a.id))
+	const otherLabels = project.artifacts.filter(a => a.type !== "dotnet").map(a => displayIdLabel(a.id))
+
+	const gitPullWhat = comp === "api" ? dotnetLabels : comp === "react" ? otherLabels : [...dotnetLabels, ...otherLabels]
+	const buildWhat =
+		comp === "api" ? "dotnet publish" : comp === "react" ? "yarn build" : "dotnet publish + yarn build"
+
+	gitPullStepLabel.textContent = `Git Pull (${gitPullWhat.join(" + ")})`
+	buildStepLabel.textContent = `Build (${buildWhat})`
+
+	const gitPullRow = row("gitPull")
+	const buildRow = row("build")
+	if (gitPullRow) gitPullRow.querySelector(".progress-label").textContent = gitPullStepLabel.textContent
+	if (buildRow) buildRow.querySelector(".progress-label").textContent = buildStepLabel.textContent
+}
+
 function renderDestInfo() {
 	const project = currentProject()
 	const env = currentEnv()
 	if (!project || !env) return
 	if (env.variants && !currentVariant()) return // variant list still populating
+
+	updateStepLabels(project)
 
 	const variant = currentVariant()
 	// A variant owns its whole deployment (publish path, archive, IIS, runtime),
@@ -221,26 +286,44 @@ function renderDestInfo() {
 	const rid = (inherit("runtimeIdentifier") || "").trim()
 	const folders = project.artifacts.map(a => a.folder).join(", ")
 
+	const building = selectedArtifactsFor(project)
+	const includesApi = building.some(a => a.type === "dotnet")
+	const buildingFolders = building.map(a => a.folder).join(", ")
+	// A persistent publish folder already has both sides sitting in it from
+	// past runs, so a partial rebuild still archives the complete pair; a
+	// fresh timestamped folder only ever contains what this run built.
+	const archiveFolders = publishDir ? folders : buildingFolders
+
 	const target = publishDir || `${config.tools.outputRoot}\\<timestamp>`
 	const lines = [`<div><span class="dk">Publishes to</span>${escapeHtml(target)}\\{${escapeHtml(folders)}}</div>`]
+
+	if (building.length < project.artifacts.length) {
+		lines.push(`<div><span class="dk">Building</span>${escapeHtml(buildingFolders)} only — the rest is left as-is</div>`)
+	}
 
 	if (publishDir) {
 		const site = (inherit("iisSiteName") || "").trim()
 		const pool = (inherit("iisAppPool") || "").trim()
-		if (site || pool) {
+		if (includesApi && (site || pool)) {
 			const what = [site && `site "${site}"`, pool && `pool "${pool}"`].filter(Boolean).join(" + ")
 			lines.push(`<div><span class="dk">IIS</span>stops ${escapeHtml(what)}, starts it again after</div>`)
+		} else if (!includesApi) {
+			lines.push(`<div><span class="dk">IIS</span>left running — API isn't part of this build</div>`)
 		}
-		lines.push(`<div><span class="dk">Existing files</span>cleared from those folders before build</div>`)
+		lines.push(`<div><span class="dk">Existing files</span>cleared from ${escapeHtml(buildingFolders)} before build</div>`)
 	}
 
+	if (includesApi) {
+		lines.push(
+			`<div><span class="dk">API build</span>${
+				rid ? `self-contained, ${escapeHtml(rid)}` : "framework-dependent, portable"
+			}</div>`
+		)
+	}
 	lines.push(
-		`<div><span class="dk">API build</span>${
-			rid ? `self-contained, ${escapeHtml(rid)}` : "framework-dependent, portable"
+		`<div><span class="dk">Archive</span>${
+			archiveName ? `${escapeHtml(archiveName)} ({${escapeHtml(archiveFolders)}})` : "none — files left unpacked"
 		}</div>`
-	)
-	lines.push(
-		`<div><span class="dk">Archive</span>${archiveName ? escapeHtml(archiveName) : "none — files left unpacked"}</div>`
 	)
 
 	destInfo.innerHTML = lines.join("")
@@ -550,6 +633,7 @@ manageEnvSelect.addEventListener("change", () => renderManageVariant())
 projectSelect.addEventListener("change", renderEnvSelect)
 presetSelect.addEventListener("change", renderVariantSelect)
 variantSelect.addEventListener("change", renderDestInfo)
+componentSelect.addEventListener("change", renderDestInfo)
 
 runBtn.addEventListener("click", async () => {
 	logEl.textContent = ""
@@ -572,7 +656,13 @@ runBtn.addEventListener("click", async () => {
 	resetProgress(steps)
 
 	try {
-		const result = await window.api.runPipeline(projectSelect.value, presetSelect.value, variantSelect.value, steps)
+		const result = await window.api.runPipeline(
+			projectSelect.value,
+			presetSelect.value,
+			variantSelect.value,
+			steps,
+			componentSelect.value
+		)
 		resultBox.textContent = result.zipPath
 			? `Done. Archive created at: ${result.zipPath}`
 			: `Done. Output folder: ${result.runDir}`
@@ -722,8 +812,8 @@ addProjectBtn.addEventListener("click", async () => {
 	renderProjectSelect()
 	renderFilterProject()
 	renderManageProject(key)
-	alert(
-		`Project "${label.trim()}" added.\n\nIts repo paths, build artifacts and patch rules aren't editable here yet — add those directly in config/environments.json before using it.`
+	showManageStatus(
+		`Project "${label.trim()}" added. Its repo paths, build artifacts and patch rules aren't editable here yet — add those directly in config/environments.json before using it.`
 	)
 })
 
@@ -812,7 +902,7 @@ removeVariantBtn.addEventListener("click", async () => {
 	const variantKey = manageVariantSelect.value
 	if (!env || !variantKey) return
 	if (Object.keys(env.variants).length <= 1) {
-		alert("Can't remove the last variant — an environment needs at least one.")
+		showManageStatus("Can't remove the last variant — an environment needs at least one.")
 		return
 	}
 	if (!confirm(`Remove variant "${env.variants[variantKey].label}"?`)) return

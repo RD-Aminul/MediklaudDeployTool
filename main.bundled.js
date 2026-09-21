@@ -26328,7 +26328,7 @@ ipcMain.handle("detect-paths", () => {
 });
 ipcMain.handle("cancel-pipeline", () => killActiveProcess());
 ipcMain.handle("open-folder", (_evt, folderPath) => shell.openPath(folderPath));
-ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, steps }) => {
+ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, steps, component }) => {
   const cfg = loadConfig();
   const project = cfg.projects[projectKey];
   if (!project) throw new Error(`Unknown project: ${projectKey}`);
@@ -26356,9 +26356,6 @@ ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, st
   const usesPublishDir = publishDir !== "";
   const archiveName = (env.archiveName || "").trim();
   const runtimeIdentifier = (env.runtimeIdentifier || "").trim();
-  const iisSiteName = (env.iisSiteName || "").trim();
-  const iisAppPool = (env.iisAppPool || "").trim();
-  const managesIis = usesPublishDir && (iisSiteName !== "" || iisAppPool !== "");
   const runDir = usesPublishDir ? publishDir : path.join(tools.outputRoot, timestamp);
   const repoPath = (id) => {
     const p = project.repos[id];
@@ -26370,11 +26367,19 @@ ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, st
     if (!b) throw new Error(`Project "${projectKey}" has no branch configured for repo "${id}"`);
     return b;
   };
-  const repoIds = Object.keys(project.repos);
   const allRepos = Object.values(project.repos);
   const artifacts = project.artifacts;
+  const selectedArtifacts = component === "api" ? artifacts.filter((a) => a.type === "dotnet") : component === "react" ? artifacts.filter((a) => a.type !== "dotnet") : artifacts;
+  if (selectedArtifacts.length === 0) {
+    throw new Error(`Project "${projectKey}" has no "${component}" artifact to build.`);
+  }
+  const selectedRepoIds = [...new Set(selectedArtifacts.map((a) => a.repo))];
   const outDirOf = (a) => path.join(runDir, a.folder);
-  const apiArtifact = artifacts.find((a) => a.type === "dotnet");
+  const apiArtifact = selectedArtifacts.find((a) => a.type === "dotnet");
+  const includesApi = !!apiArtifact;
+  const iisSiteName = (env.iisSiteName || "").trim();
+  const iisAppPool = (env.iisAppPool || "").trim();
+  const managesIis = usesPublishDir && includesApi && (iisSiteName !== "" || iisAppPool !== "");
   let iisStopped = null;
   const restoreApp = async () => {
     if (!usesPublishDir) return;
@@ -26395,11 +26400,11 @@ ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, st
     if (steps.gitPull) {
       sendStep("gitPull", "running");
       sendProgress("gitPull", 0);
-      const share = 100 / repoIds.length;
-      for (let i = 0; i < repoIds.length; i++) {
+      const share = 100 / selectedRepoIds.length;
+      for (let i = 0; i < selectedRepoIds.length; i++) {
         await gitPull(
-          allRepos[i],
-          repoBranch(repoIds[i]),
+          repoPath(selectedRepoIds[i]),
+          repoBranch(selectedRepoIds[i]),
           sendLog,
           slice("gitPull", i * share, (i + 1) * share)
         );
@@ -26413,7 +26418,7 @@ ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, st
       sendLog(`
 Patching ${project.label} for "${env.label}"
 `);
-      const rules = project.patchRules.map((r) => ({
+      const rules = project.patchRules.filter((r) => selectedRepoIds.includes(r.repo)).map((r) => ({
         ...r,
         file: path.join(repoPath(r.repo), r.file)
       }));
@@ -26433,14 +26438,14 @@ Patching ${project.label} for "${env.label}"
         }
         const artifactFolderNames = artifacts.map((a) => a.folder);
         await clearDirContents(runDir, allRepos, sendLog, artifactFolderNames);
-        for (const a of artifacts) {
+        for (const a of selectedArtifacts) {
           const keep = !managesIis && a === apiArtifact ? [APP_OFFLINE] : [];
           await clearDirContents(outDirOf(a), allRepos, sendLog, keep);
         }
       }
-      const share = 100 / artifacts.length;
-      for (let i = 0; i < artifacts.length; i++) {
-        const a = artifacts[i];
+      const share = 100 / selectedArtifacts.length;
+      for (let i = 0; i < selectedArtifacts.length; i++) {
+        const a = selectedArtifacts[i];
         const from = i * share;
         const to = (i + 1) * share;
         const outDir = outDirOf(a);
