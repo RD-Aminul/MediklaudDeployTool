@@ -47,12 +47,21 @@
 							<select id="variantSelect"></select>
 						</div>
 
+						<div id="componentSelectGroup">
+							<label for="componentSelect">Deploy Component</label>
+							<select id="componentSelect">
+								<option value="both">Both (API + React)</option>
+								<option value="api">API Only</option>
+								<option value="react">React Only</option>
+							</select>
+						</div>
+
 						<div id="destInfo" class="dest-info"></div>
 
 						<div class="steps">
-							<label><input type="checkbox" id="stepGitPull" checked /> <span class="step-check-icon">🔄</span> Git Pull (API + React)</label>
+							<label><input type="checkbox" id="stepGitPull" checked /> <span class="step-check-icon">🔄</span> <span id="gitPullStepLabel">Git Pull (API + React)</span></label>
 							<label><input type="checkbox" id="stepPatch" checked /> <span class="step-check-icon">🧩</span> Patch Connection String / api.js</label>
-							<label><input type="checkbox" id="stepBuild" checked /> <span class="step-check-icon">🛠️</span> Build (dotnet publish + yarn build)</label>
+							<label><input type="checkbox" id="stepBuild" checked /> <span class="step-check-icon">🛠️</span> <span id="buildStepLabel">Build (dotnet publish + yarn build)</span></label>
 							<label><input type="checkbox" id="stepZip" checked /> <span class="step-check-icon">📦</span> <span id="zipStepLabel">Archive (7-Zip)</span></label>
 						</div>
 
@@ -195,6 +204,8 @@
 							<button type="button" id="addVariantBtn" class="small-btn">+ Add</button>
 							<button type="button" id="removeVariantBtn" class="small-btn danger-btn">Remove</button>
 						</div>
+
+						<p id="manageStatus" class="note" hidden></p>
 					</div>
 				</section>
 			</main>

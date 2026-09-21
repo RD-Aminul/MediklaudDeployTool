@@ -3,8 +3,8 @@ const { contextBridge, ipcRenderer } = require("electron")
 contextBridge.exposeInMainWorld("api", {
 	getConfig: () => ipcRenderer.invoke("get-config"),
 	saveConfig: cfg => ipcRenderer.invoke("save-config", cfg),
-	runPipeline: (projectKey, envKey, variantKey, steps) =>
-		ipcRenderer.invoke("run-pipeline", { projectKey, envKey, variantKey, steps }),
+	runPipeline: (projectKey, envKey, variantKey, steps, component) =>
+		ipcRenderer.invoke("run-pipeline", { projectKey, envKey, variantKey, steps, component }),
 	cancelPipeline: () => ipcRenderer.invoke("cancel-pipeline"),
 	openFolder: folderPath => ipcRenderer.invoke("open-folder", folderPath),
 	detectPaths: () => ipcRenderer.invoke("detect-paths"),

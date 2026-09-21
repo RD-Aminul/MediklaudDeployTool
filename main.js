@@ -178,7 +178,7 @@ ipcMain.handle("cancel-pipeline", () => killActiveProcess())
 
 ipcMain.handle("open-folder", (_evt, folderPath) => shell.openPath(folderPath))
 
-ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, steps }) => {
+ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, steps, component }) => {
 	const cfg = loadConfig()
 	const project = cfg.projects[projectKey]
 	if (!project) throw new Error(`Unknown project: ${projectKey}`)
@@ -222,10 +222,6 @@ ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, st
 	const archiveName = (env.archiveName || "").trim()
 	const runtimeIdentifier = (env.runtimeIdentifier || "").trim()
 
-	const iisSiteName = (env.iisSiteName || "").trim()
-	const iisAppPool = (env.iisAppPool || "").trim()
-	const managesIis = usesPublishDir && (iisSiteName !== "" || iisAppPool !== "")
-
 	const runDir = usesPublishDir ? publishDir : path.join(tools.outputRoot, timestamp)
 
 	const repoPath = id => {
@@ -238,12 +234,35 @@ ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, st
 		if (!b) throw new Error(`Project "${projectKey}" has no branch configured for repo "${id}"`)
 		return b
 	}
-	const repoIds = Object.keys(project.repos)
 	const allRepos = Object.values(project.repos)
 	const artifacts = project.artifacts
+
+	// "component" lets a run touch only the API side or only the frontend side
+	// (Jail's PMS + VMS both count as "frontend" here) — the other side's
+	// already-deployed files are left completely alone: not pulled, not
+	// patched, not cleared, not rebuilt. "both"/unset keeps the old behaviour.
+	const selectedArtifacts =
+		component === "api"
+			? artifacts.filter(a => a.type === "dotnet")
+			: component === "react"
+			? artifacts.filter(a => a.type !== "dotnet")
+			: artifacts
+	if (selectedArtifacts.length === 0) {
+		throw new Error(`Project "${projectKey}" has no "${component}" artifact to build.`)
+	}
+	const selectedRepoIds = [...new Set(selectedArtifacts.map(a => a.repo))]
+
 	const outDirOf = a => path.join(runDir, a.folder)
-	// The API artifact is the one IIS serves, so it is where app_offline.htm goes.
-	const apiArtifact = artifacts.find(a => a.type === "dotnet")
+	// The API artifact is the one IIS serves, so it is where app_offline.htm
+	// goes — undefined when this run doesn't include it (component: "react").
+	const apiArtifact = selectedArtifacts.find(a => a.type === "dotnet")
+	const includesApi = !!apiArtifact
+
+	const iisSiteName = (env.iisSiteName || "").trim()
+	const iisAppPool = (env.iisAppPool || "").trim()
+	// Only the API's own DLLs get locked by a running IIS worker process — a
+	// frontend-only run never needs to touch IIS at all.
+	const managesIis = usesPublishDir && includesApi && (iisSiteName !== "" || iisAppPool !== "")
 
 	// Remembers what this run actually stopped, so the restore only starts back
 	// up what it took down.
@@ -276,11 +295,11 @@ ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, st
 		if (steps.gitPull) {
 			sendStep("gitPull", "running")
 			sendProgress("gitPull", 0)
-			const share = 100 / repoIds.length
-			for (let i = 0; i < repoIds.length; i++) {
+			const share = 100 / selectedRepoIds.length
+			for (let i = 0; i < selectedRepoIds.length; i++) {
 				await gitPull(
-					allRepos[i],
-					repoBranch(repoIds[i]),
+					repoPath(selectedRepoIds[i]),
+					repoBranch(selectedRepoIds[i]),
 					sendLog,
 					slice("gitPull", i * share, (i + 1) * share)
 				)
@@ -294,10 +313,14 @@ ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, st
 			sendProgress("patch", 0)
 			sendLog(`\nPatching ${project.label} for "${env.label}"\n`)
 
-			const rules = project.patchRules.map(r => ({
-				...r,
-				file: path.join(repoPath(r.repo), r.file),
-			}))
+			// Only touch files that belong to a repo actually part of this run —
+			// an API-only run must never rewrite the React api.js, and vice versa.
+			const rules = project.patchRules
+				.filter(r => selectedRepoIds.includes(r.repo))
+				.map(r => ({
+					...r,
+					file: path.join(repoPath(r.repo), r.file),
+				}))
 			patchSnapshot = snapshotFiles(rules)
 			applyPatchRules(rules, env.values, sendLog)
 
@@ -329,17 +352,19 @@ ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, st
 				await clearDirContents(runDir, allRepos, sendLog, artifactFolderNames)
 
 				// No fixed wait here — clearDirContents backs off and retries only if
-				// something is actually still holding a file.
-				for (const a of artifacts) {
+				// something is actually still holding a file. Only the folders in this
+				// run are touched — the other side's existing folder (and whatever it
+				// currently holds) is left completely alone.
+				for (const a of selectedArtifacts) {
 					const keep = !managesIis && a === apiArtifact ? [APP_OFFLINE] : []
 					await clearDirContents(outDirOf(a), allRepos, sendLog, keep)
 				}
 			}
 
 			// Each artifact gets an equal slice of the bar.
-			const share = 100 / artifacts.length
-			for (let i = 0; i < artifacts.length; i++) {
-				const a = artifacts[i]
+			const share = 100 / selectedArtifacts.length
+			for (let i = 0; i < selectedArtifacts.length; i++) {
+				const a = selectedArtifacts[i]
 				const from = i * share
 				const to = (i + 1) * share
 				const outDir = outDirOf(a)
