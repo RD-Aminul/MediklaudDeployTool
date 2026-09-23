@@ -144,7 +144,66 @@ Restored ${file} to its pre-patch content
         }
       }
     }
-    module2.exports = { applyPatchRules: applyPatchRules2, toggleActiveLine, setEnvValue, buildRegex, snapshotFiles: snapshotFiles2, restoreFiles: restoreFiles2 };
+    function looksLikeEntry(text) {
+      return /^(?:[\w$]+\s+)*["']?[\w.$]+["']?\s*[:=]\s*["'`]/.test(text) || /^[A-Z][A-Z0-9_]*\s*=/.test(text);
+    }
+    function trailingComment(rest) {
+      const m = (rest || "").match(/\/\/\s*(.*?)\s*$/);
+      return m ? m[1] : "";
+    }
+    function sectionHeading(lines, index, entry) {
+      const collected = [];
+      for (let j = index - 1; j >= 0 && j >= index - 15; j--) {
+        const raw = lines[j].trim();
+        if (raw === "") {
+          if (collected.length) break;
+          continue;
+        }
+        const isComment = /^(\/\/|\/\*|#|\*)/.test(raw);
+        const text = isComment ? raw.replace(/^[/#*\s]+/, "").replace(/\*\/\s*$/, "").trim() : raw;
+        if (entry.test(lines[j]) || looksLikeEntry(text)) {
+          if (collected.length) break;
+          continue;
+        }
+        if (!isComment) break;
+        if (!text || /^[=\-_*~#.\s]+$/.test(text)) {
+          if (collected.length) break;
+          continue;
+        }
+        if (/\bend$/i.test(text)) break;
+        collected.unshift(text.replace(/\s+start$/i, ""));
+        if (collected.length === 2) break;
+      }
+      return collected.join(" \xB7 ");
+    }
+    function scanCandidates2(content, kind, name) {
+      const { lines } = splitLines(content);
+      const isEnv = kind === "env";
+      const entry = isEnv ? new RegExp(`^\\s*(#\\s*)?(${escapeRegex(name)}(?:_(\\w+))?)\\s*=\\s*(.*?)\\s*$`) : buildRegex(kind, name);
+      const found = [];
+      for (let i = 0; i < lines.length; i++) {
+        const m = lines[i].match(entry);
+        if (!m) continue;
+        const value = m[4];
+        if (!value) continue;
+        found.push({
+          value,
+          label: isEnv ? m[3] ? m[3].replace(/_/g, " ") : "" : trailingComment(m[5]),
+          active: isEnv ? !m[1] && !m[3] : !m[2],
+          group: sectionHeading(lines, i, entry)
+        });
+      }
+      return found;
+    }
+    module2.exports = {
+      applyPatchRules: applyPatchRules2,
+      toggleActiveLine,
+      setEnvValue,
+      buildRegex,
+      snapshotFiles: snapshotFiles2,
+      restoreFiles: restoreFiles2,
+      scanCandidates: scanCandidates2
+    };
   }
 });
 
@@ -25840,11 +25899,16 @@ $ ${command} ${args.join(" ")}   (cwd: ${cwd})
       }
     }
     function yarnBuild2(reactRepoPath, onLine, onProgress) {
-      if (hasYarn()) {
-        return runCommand("yarn", ["build"], reactRepoPath, onLine, YARN_BUILD_MILESTONES, onProgress);
-      }
-      onLine("\n[INFO] yarn not found on this machine \u2014 building with npm instead.\n");
-      return runCommand("npm", ["run", "build"], reactRepoPath, onLine, YARN_BUILD_MILESTONES, onProgress);
+      const useYarn = hasYarn();
+      const tool = useYarn ? "yarn" : "npm";
+      if (!useYarn) onLine("\n[INFO] yarn not found on this machine \u2014 using npm instead.\n");
+      const installArgs = useYarn ? ["install", "--ignore-engines"] : ["install"];
+      onLine(`
+Syncing node_modules with package.json (${tool} install)...
+`);
+      return runCommand(tool, installArgs, reactRepoPath, onLine, null, null).then(
+        () => runCommand(tool, useYarn ? ["build"] : ["run", "build"], reactRepoPath, onLine, YARN_BUILD_MILESTONES, onProgress)
+      );
     }
     var DOTNET_PUBLISH_MILESTONES = [
       { re: /Determining projects to restore/i, percent: 8 },
@@ -26195,11 +26259,192 @@ var require_pathDetector = __commonJS({
   }
 });
 
+// src/analyzer.js
+var require_analyzer = __commonJS({
+  "src/analyzer.js"(exports2, module2) {
+    var fs2 = require("fs");
+    var path2 = require("path");
+    var { buildRegex } = require_patcher();
+    var { getCurrentBranch: getCurrentBranch2 } = require_runner();
+    var SKIP_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git", "bin", "obj", "build", "dist", "wwwroot", ".vs", ".vscode", "packages", "Migrations", "public"]);
+    function listFiles(root, exts, maxDepth, limit = 4e3) {
+      const out = [];
+      const walk = (dir, depth) => {
+        if (out.length >= limit) return;
+        let entries;
+        try {
+          entries = fs2.readdirSync(dir, { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const e of entries) {
+          if (out.length >= limit) return;
+          const full = path2.join(dir, e.name);
+          if (e.isDirectory()) {
+            if (depth < maxDepth && !SKIP_DIRS.has(e.name) && !e.name.startsWith(".")) walk(full, depth + 1);
+          } else if (exts.includes(path2.extname(e.name).toLowerCase())) {
+            out.push(path2.relative(root, full));
+          }
+        }
+      };
+      walk(root, 0);
+      return out;
+    }
+    function readLines(file) {
+      try {
+        return fs2.readFileSync(file, "utf8").split(/\r\n|\n/);
+      } catch {
+        return [];
+      }
+    }
+    function patchableLines(lines, kind, name) {
+      const re = buildRegex(kind, name);
+      return lines.filter((l) => re.test(l)).length;
+    }
+    function pickCsproj(root) {
+      const candidates = listFiles(root, [".csproj"], 3).map((rel) => {
+        const dir = path2.join(root, path2.dirname(rel));
+        let text = "";
+        try {
+          text = fs2.readFileSync(path2.join(root, rel), "utf8");
+        } catch {
+        }
+        let score = 0;
+        if (/Sdk="Microsoft\.NET\.Sdk\.Web"/i.test(text)) score += 3;
+        if (fs2.existsSync(path2.join(dir, "appsettings.json"))) score += 2;
+        if (fs2.existsSync(path2.join(dir, "Program.cs"))) score += 1;
+        if (/test/i.test(rel)) score -= 4;
+        return { rel, score };
+      });
+      candidates.sort((a, b) => b.score - a.score);
+      return candidates[0] ? candidates[0].rel : null;
+    }
+    function jsonConnectionRules(root, csproj) {
+      const rel = path2.join(path2.dirname(csproj), "appsettings.json");
+      const lines = readLines(path2.join(root, rel));
+      const names = [];
+      let inBlock = false;
+      for (const line of lines) {
+        if (!inBlock) {
+          if (/"ConnectionStrings"\s*:\s*\{/.test(line)) inBlock = true;
+          continue;
+        }
+        if (/^\s*\}/.test(line)) break;
+        const m = line.match(/^\s*(?:\/\/\s*)?"(\w+)"\s*:\s*"/);
+        if (m && !names.includes(m[1])) names.push(m[1]);
+      }
+      return names.map((name) => ({ file: rel, kind: "json", name, count: patchableLines(lines, "json", name) })).filter((r) => r.count > 0);
+    }
+    var CONN_VALUE = /(password|pwd)\s*=/i;
+    var CONN_TARGET = /(user id|uid|data source|host|server)\s*=/i;
+    function csConnectionRules(root) {
+      const found = /* @__PURE__ */ new Map();
+      for (const rel of listFiles(root, [".cs"], 5)) {
+        let content;
+        try {
+          content = fs2.readFileSync(path2.join(root, rel), "utf8");
+        } catch {
+          continue;
+        }
+        if (!CONN_VALUE.test(content)) continue;
+        const lines = content.split(/\r\n|\n/);
+        for (const line of lines) {
+          if (!CONN_VALUE.test(line) || line.length > 2e3) continue;
+          const m = line.match(/^([^"]*)=\s*"([^"]*)"\s*;/);
+          const id = m && m[1].match(/([A-Za-z_]\w*)\s*$/);
+          if (!id || !CONN_VALUE.test(m[2]) || !CONN_TARGET.test(m[2])) continue;
+          const key = `${rel}|${id[1]}`;
+          if (!found.has(key)) found.set(key, { file: rel, kind: "cs", name: id[1], lines });
+        }
+      }
+      return [...found.values()].map(({ lines, ...r }) => ({ ...r, count: patchableLines(lines, "cs", r.name) })).filter((r) => r.count > 0).sort((a, b) => b.count - a.count);
+    }
+    function analyzeApi(root) {
+      const result = { branch: getCurrentBranch2(root), csproj: pickCsproj(root), rules: [], warnings: [] };
+      if (!result.csproj) {
+        result.warnings.push("no .csproj found in the API folder");
+        return result;
+      }
+      const json = jsonConnectionRules(root, result.csproj);
+      const cs = csConnectionRules(root);
+      result.rules = [...json, ...cs.length ? cs.filter((r) => r.file === cs[0].file) : []];
+      if (result.rules.length === 0) result.warnings.push("no connection string found in the API code");
+      return result;
+    }
+    var URL_KEY = /url|api|base|host|server/i;
+    function envUrlRules(root) {
+      const rel = ".env";
+      const lines = readLines(path2.join(root, rel));
+      const active = [];
+      for (const line of lines) {
+        const m = line.match(/^\s*((?:REACT_APP|VITE)_\w+)\s*=\s*["']?https?:\/\//);
+        if (m && URL_KEY.test(m[1])) active.push(m[1]);
+      }
+      return active.filter((n) => !active.some((o) => o !== n && n.startsWith(`${o}_`))).map((name) => ({
+        file: rel,
+        kind: "env",
+        name,
+        count: lines.filter((l) => new RegExp(`^\\s*#?\\s*${name}(_\\w+)?\\s*=`).test(l)).length
+      }));
+    }
+    function sourceUrlRules(root) {
+      const found = /* @__PURE__ */ new Map();
+      for (const rel of listFiles(path2.join(root, "src"), [".js", ".jsx", ".ts", ".tsx"], 4).map((r) => path2.join("src", r))) {
+        const lines = readLines(path2.join(root, rel));
+        if (!lines.some((l) => l.includes("http"))) continue;
+        for (const line of lines) {
+          if (!line.includes("http") || line.length > 2e3) continue;
+          let m = line.match(/^\s*(?:\/\/\s*)?(\w+)\s*:\s*["']https?:\/\//);
+          let kind = "js";
+          if (!m) {
+            m = line.match(/^\s*(?:\/\/\s*)?(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*"https?:\/\/[^"]*"\s*;/);
+            kind = "cs";
+          }
+          if (!m || !URL_KEY.test(m[1])) continue;
+          const key = `${rel}|${m[1]}|${kind}`;
+          if (!found.has(key)) found.set(key, { file: rel, kind, name: m[1], lines });
+        }
+      }
+      return [...found.values()].map(({ lines, ...r }) => ({ ...r, count: patchableLines(lines, r.kind, r.name) })).filter((r) => r.count > 0).sort((a, b) => b.count - a.count);
+    }
+    function analyzeReact(root) {
+      let pkg = {};
+      try {
+        pkg = JSON.parse(fs2.readFileSync(path2.join(root, "package.json"), "utf8"));
+      } catch {
+      }
+      const deps = { ...pkg.dependencies || {}, ...pkg.devDependencies || {} };
+      const result = {
+        branch: getCurrentBranch2(root),
+        buildDir: deps.vite ? "dist" : "build",
+        rules: [],
+        warnings: []
+      };
+      if (!pkg.name && !pkg.scripts) result.warnings.push("no package.json in the React folder");
+      const env = envUrlRules(root);
+      const src = sourceUrlRules(root);
+      const best = env[0] || src[0];
+      if (best) result.rules = [best];
+      else result.warnings.push("no API URL found in .env or src");
+      return result;
+    }
+    function analyzeFolders2(folders) {
+      return folders.map((f) => {
+        if (!f.path || !fs2.existsSync(f.path)) return { ...f, error: "folder not found" };
+        const info = f.role === "api" ? analyzeApi(f.path) : analyzeReact(f.path);
+        if (!fs2.existsSync(path2.join(f.path, ".git"))) info.warnings.push("not a git repository \u2014 Git Pull will fail");
+        return { ...f, ...info };
+      });
+    }
+    module2.exports = { analyzeFolders: analyzeFolders2 };
+  }
+});
+
 // main.js
-var { app, BrowserWindow, ipcMain, Menu, shell } = require("electron");
+var { app, BrowserWindow, ipcMain, Menu, shell, dialog } = require("electron");
 var path = require("path");
 var fs = require("fs");
-var { applyPatchRules, snapshotFiles, restoreFiles } = require_patcher();
+var { applyPatchRules, snapshotFiles, restoreFiles, scanCandidates } = require_patcher();
 var {
   gitPull,
   yarnBuild,
@@ -26216,6 +26461,7 @@ var {
 } = require_runner();
 var { stopIis, startIis } = require_iis();
 var { findFolders } = require_pathDetector();
+var { analyzeFolders } = require_analyzer();
 var bundledConfigPath = path.join(__dirname, "config", "environments.json");
 var configPath = app.isPackaged ? path.join(app.getPath("userData"), "environments.json") : bundledConfigPath;
 function ensureConfigExists() {
@@ -26328,6 +26574,49 @@ ipcMain.handle("detect-paths", () => {
 });
 ipcMain.handle("cancel-pipeline", () => killActiveProcess());
 ipcMain.handle("open-folder", (_evt, folderPath) => shell.openPath(folderPath));
+ipcMain.handle("focus-window", () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.focus();
+  mainWindow.webContents.focus();
+});
+ipcMain.handle("pick-folder", async (_evt, startPath) => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openDirectory"],
+    defaultPath: startPath && fs.existsSync(startPath) ? startPath : void 0
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+ipcMain.handle("analyze-folders", (_evt, folders) => analyzeFolders(folders));
+ipcMain.handle("scan-candidates", (_evt, projectKey) => {
+  const project = loadConfig().projects[projectKey];
+  if (!project) return { fields: {}, problems: [`Unknown project "${projectKey}"`] };
+  const fields = {};
+  const problems = [];
+  for (const rule of project.patchRules || []) {
+    const repoPath = (project.repos || {})[rule.repo];
+    if (!repoPath) {
+      problems.push(`${rule.field}: repo "${rule.repo}" isn't set up`);
+      continue;
+    }
+    const file = path.join(repoPath, rule.file);
+    if (!fs.existsSync(file)) {
+      problems.push(`${rule.field}: ${file} not found`);
+      continue;
+    }
+    const list = fields[rule.field] || (fields[rule.field] = []);
+    for (const c of scanCandidates(fs.readFileSync(file, "utf8"), rule.kind, rule.name)) {
+      const existing = list.find((x) => x.value === c.value);
+      if (existing) {
+        existing.active = existing.active || c.active;
+        existing.label = existing.label || c.label;
+        existing.group = existing.group || c.group;
+      } else {
+        list.push(c);
+      }
+    }
+  }
+  return { fields, problems };
+});
 ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, steps, component }) => {
   const cfg = loadConfig();
   const project = cfg.projects[projectKey];
@@ -26475,6 +26764,16 @@ Publishing ${a.id} self-contained for ${runtimeIdentifier}
           sendLog(`
 Copied ${a.id} build -> ${outDir}
 `);
+          try {
+            fs.rmSync(built, { recursive: true, force: true });
+            sendLog(`
+Removed ${built} (already copied to ${outDir})
+`);
+          } catch (err) {
+            sendLog(`
+[WARN] could not remove ${built} \u2014 ${err.message}
+`);
+          }
         } else {
           throw new Error(`Unknown artifact type "${a.type}" for "${a.id}"`);
         }

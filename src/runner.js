@@ -150,12 +150,28 @@ function hasYarn() {
 	}
 }
 
+// A git pull can bring in a package.json that adds/updates a dependency (e.g.
+// cross-env) without node_modules on this machine ever being told — the build
+// script then fails with "'x' is not recognized..." for whatever new package
+// it needed. Running install first keeps node_modules in sync with whatever
+// was just pulled; when nothing changed, yarn/npm both no-op quickly by
+// checking the lockfile, so this is cheap on the common case.
 function yarnBuild(reactRepoPath, onLine, onProgress) {
-	if (hasYarn()) {
-		return runCommand("yarn", ["build"], reactRepoPath, onLine, YARN_BUILD_MILESTONES, onProgress)
-	}
-	onLine("\n[INFO] yarn not found on this machine — building with npm instead.\n")
-	return runCommand("npm", ["run", "build"], reactRepoPath, onLine, YARN_BUILD_MILESTONES, onProgress)
+	const useYarn = hasYarn()
+	const tool = useYarn ? "yarn" : "npm"
+	if (!useYarn) onLine("\n[INFO] yarn not found on this machine — using npm instead.\n")
+
+	// Yarn classic aborts the whole install if ANY dependency's declared
+	// "engines" range doesn't match the installed Node — even a lint-only
+	// devDependency nobody runs directly. That range is usually far stricter
+	// than what the package actually needs, so --ignore-engines treats it as
+	// advisory instead of a hard stop. npm already only warns, never blocks.
+	const installArgs = useYarn ? ["install", "--ignore-engines"] : ["install"]
+
+	onLine(`\nSyncing node_modules with package.json (${tool} install)...\n`)
+	return runCommand(tool, installArgs, reactRepoPath, onLine, null, null).then(() =>
+		runCommand(tool, useYarn ? ["build"] : ["run", "build"], reactRepoPath, onLine, YARN_BUILD_MILESTONES, onProgress)
+	)
 }
 
 const DOTNET_PUBLISH_MILESTONES = [

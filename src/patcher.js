@@ -175,4 +175,86 @@ function restoreFiles(snapshot, onLine) {
 	}
 }
 
-module.exports = { applyPatchRules, toggleActiveLine, setEnvValue, buildRegex, snapshotFiles, restoreFiles }
+/* ---------------- candidate scan (Settings tab pick list) ---------------- */
+
+// A line that is (or is a commented-out copy of) some key/value config entry —
+// any key, not just the one being scanned — so it is never mistaken for a
+// section heading: `"X": "..."`, `baseURL: '...'`, `_connectionString = "..."`,
+// `export const API_BASE_URL = "..."`, or a bare `.env` style `KEY=...`.
+function looksLikeEntry(text) {
+	return /^(?:[\w$]+\s+)*["']?[\w.$]+["']?\s*[:=]\s*["'`]/.test(text) || /^[A-Z][A-Z0-9_]*\s*=/.test(text)
+}
+
+function trailingComment(rest) {
+	const m = (rest || "").match(/\/\/\s*(.*?)\s*$/)
+	return m ? m[1] : ""
+}
+
+// The nearest heading comment above a candidate line — "02.BNHL",
+// "LIVE SERVER · accounts.dhakachamber.com" — skipping sibling entries, blank
+// lines and "=====" rules, and stopping at the previous section's "... End"
+// marker or at real code, so a value is never labelled with a heading that
+// belongs to a different block.
+function sectionHeading(lines, index, entry) {
+	const collected = []
+	for (let j = index - 1; j >= 0 && j >= index - 15; j--) {
+		const raw = lines[j].trim()
+		if (raw === "") {
+			if (collected.length) break
+			continue
+		}
+		const isComment = /^(\/\/|\/\*|#|\*)/.test(raw)
+		const text = isComment ? raw.replace(/^[/#*\s]+/, "").replace(/\*\/\s*$/, "").trim() : raw
+		if (entry.test(lines[j]) || looksLikeEntry(text)) {
+			if (collected.length) break
+			continue
+		}
+		if (!isComment) break
+		if (!text || /^[=\-_*~#.\s]+$/.test(text)) {
+			if (collected.length) break
+			continue
+		}
+		if (/\bend$/i.test(text)) break
+		collected.unshift(text.replace(/\s+start$/i, ""))
+		if (collected.length === 2) break
+	}
+	return collected.join(" · ")
+}
+
+// Every value a patch rule could switch its file to — each active or
+// commented-out line holding the rule's key (for .env files, the key and its
+// NAME_suffix alternatives) — with the line's trailing comment as a label and
+// the nearest heading above it as a group. Lets the Settings tab offer a pick
+// list instead of making someone retype a value character-for-character.
+function scanCandidates(content, kind, name) {
+	const { lines } = splitLines(content)
+	const isEnv = kind === "env"
+	const entry = isEnv
+		? new RegExp(`^\\s*(#\\s*)?(${escapeRegex(name)}(?:_(\\w+))?)\\s*=\\s*(.*?)\\s*$`)
+		: buildRegex(kind, name)
+
+	const found = []
+	for (let i = 0; i < lines.length; i++) {
+		const m = lines[i].match(entry)
+		if (!m) continue
+		const value = m[4]
+		if (!value) continue
+		found.push({
+			value,
+			label: isEnv ? (m[3] ? m[3].replace(/_/g, " ") : "") : trailingComment(m[5]),
+			active: isEnv ? !m[1] && !m[3] : !m[2],
+			group: sectionHeading(lines, i, entry),
+		})
+	}
+	return found
+}
+
+module.exports = {
+	applyPatchRules,
+	toggleActiveLine,
+	setEnvValue,
+	buildRegex,
+	snapshotFiles,
+	restoreFiles,
+	scanCandidates,
+}

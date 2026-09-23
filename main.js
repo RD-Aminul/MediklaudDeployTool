@@ -1,8 +1,8 @@
-const { app, BrowserWindow, ipcMain, Menu, shell } = require("electron")
+const { app, BrowserWindow, ipcMain, Menu, shell, dialog } = require("electron")
 const path = require("path")
 const fs = require("fs")
 
-const { applyPatchRules, snapshotFiles, restoreFiles } = require("./src/patcher")
+const { applyPatchRules, snapshotFiles, restoreFiles, scanCandidates } = require("./src/patcher")
 const {
 	gitPull,
 	yarnBuild,
@@ -19,6 +19,7 @@ const {
 } = require("./src/runner")
 const { stopIis, startIis } = require("./src/iis")
 const { findFolders } = require("./src/pathDetector")
+const { analyzeFolders } = require("./src/analyzer")
 
 const bundledConfigPath = path.join(__dirname, "config", "environments.json")
 
@@ -177,6 +178,66 @@ ipcMain.handle("detect-paths", () => {
 ipcMain.handle("cancel-pipeline", () => killActiveProcess())
 
 ipcMain.handle("open-folder", (_evt, folderPath) => shell.openPath(folderPath))
+
+// Electron can leave the page without OS keyboard focus (after a native
+// dialog, or when a focused element gets hidden) — inputs render normally but
+// swallow every keystroke until the window is alt-tabbed away and back.
+// Explicitly re-focusing the window and its web contents restores typing
+// without the user having to do anything.
+ipcMain.handle("focus-window", () => {
+	if (!mainWindow || mainWindow.isDestroyed()) return
+	mainWindow.focus()
+	mainWindow.webContents.focus()
+})
+
+// Reads every file the project's patch rules touch and returns, per value
+// field, every value those files already hold (active or commented out) for
+// the Settings tab's pick list. Several rules can feed one field — Jail's
+// apiBaseUrl is patched into both PMS's .env and VMS's Variables.js — so a
+// field's list is the union across its files, de-duplicated by value.
+ipcMain.handle("pick-folder", async (_evt, startPath) => {
+	const result = await dialog.showOpenDialog(mainWindow, {
+		properties: ["openDirectory"],
+		defaultPath: startPath && fs.existsSync(startPath) ? startPath : undefined,
+	})
+	return result.canceled ? null : result.filePaths[0]
+})
+
+// Quick Setup — see src/analyzer.js.
+ipcMain.handle("analyze-folders", (_evt, folders) => analyzeFolders(folders))
+
+ipcMain.handle("scan-candidates", (_evt, projectKey) => {
+	const project = loadConfig().projects[projectKey]
+	if (!project) return { fields: {}, problems: [`Unknown project "${projectKey}"`] }
+
+	const fields = {}
+	const problems = []
+	for (const rule of project.patchRules || []) {
+		const repoPath = (project.repos || {})[rule.repo]
+		if (!repoPath) {
+			problems.push(`${rule.field}: repo "${rule.repo}" isn't set up`)
+			continue
+		}
+		const file = path.join(repoPath, rule.file)
+		if (!fs.existsSync(file)) {
+			problems.push(`${rule.field}: ${file} not found`)
+			continue
+		}
+
+		const list = fields[rule.field] || (fields[rule.field] = [])
+		for (const c of scanCandidates(fs.readFileSync(file, "utf8"), rule.kind, rule.name)) {
+			const existing = list.find(x => x.value === c.value)
+			if (existing) {
+				existing.active = existing.active || c.active
+				existing.label = existing.label || c.label
+				existing.group = existing.group || c.group
+			} else {
+				list.push(c)
+			}
+		}
+	}
+	return { fields, problems }
+})
 
 ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, steps, component }) => {
 	const cfg = loadConfig()
@@ -393,6 +454,16 @@ ipcMain.handle("run-pipeline", async (_evt, { projectKey, envKey, variantKey, st
 					fs.mkdirSync(outDir, { recursive: true })
 					fs.cpSync(built, outDir, { recursive: true })
 					sendLog(`\nCopied ${a.id} build -> ${outDir}\n`)
+
+					// The files now live at the publish destination — leaving a second
+					// copy sitting in the repo is just stale build output that would
+					// otherwise linger there indefinitely.
+					try {
+						fs.rmSync(built, { recursive: true, force: true })
+						sendLog(`\nRemoved ${built} (already copied to ${outDir})\n`)
+					} catch (err) {
+						sendLog(`\n[WARN] could not remove ${built} — ${err.message}\n`)
+					}
 				} else {
 					throw new Error(`Unknown artifact type "${a.type}" for "${a.id}"`)
 				}
