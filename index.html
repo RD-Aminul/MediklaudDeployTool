@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Mediklaud Deploy Tool</title>
+<title>Mediklaud Build &amp; Deploy Tool</title>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -17,9 +17,10 @@
 			</div>
 
 			<nav class="tabs">
-				<button class="tab active" data-tab="deploy"><span class="tab-icon">🚀</span> Deploy</button>
-				<button class="tab" data-tab="settings"><span class="tab-icon">⚙️</span> Settings</button>
-				<button class="tab" data-tab="manage"><span class="tab-icon">🗂️</span> Manage</button>
+				<button class="tab active" data-tab="deploy"><span class="tab-icon">🚀</span> Build</button>
+				<button class="tab" data-tab="settings"><span class="tab-icon">🌐</span> Environments</button>
+				<button class="tab" data-tab="manage"><span class="tab-icon">📁</span> Projects</button>
+				<button class="tab" data-tab="detect"><span class="tab-icon">🔍</span> Detect Projects</button>
 			</nav>
 
 			<div class="sidebar-footer">
@@ -32,7 +33,7 @@
 				<!-- ===================== DEPLOY TAB ===================== -->
 				<section id="tab-deploy" class="tab-page active">
 					<div class="panel">
-						<h2>Run a Deploy</h2>
+						<h2>Run a Build</h2>
 
 						<label for="projectSelect">Project</label>
 						<select id="projectSelect"></select>
@@ -48,7 +49,7 @@
 						</div>
 
 						<div id="componentSelectGroup">
-							<label for="componentSelect">Deploy Component</label>
+							<label for="componentSelect">Build Component</label>
 							<select id="componentSelect">
 								<option value="both">Both (API + React)</option>
 								<option value="api">API Only</option>
@@ -169,20 +170,13 @@
 						<span id="saveStatus"></span>
 					</div>
 
-					<div class="panel">
-						<h2>Paths</h2>
-						<div id="pathsView" class="paths"></div>
-						<button id="detectPathsBtn" class="secondary-btn">🔍&nbsp; Detect Paths</button>
-						<span id="detectStatus"></span>
-						<div id="detectResults" class="detect-results" hidden></div>
-					</div>
 				</section>
 
 				<!-- ===================== MANAGE TAB ===================== -->
 				<section id="tab-manage" class="tab-page">
 					<div class="panel">
 						<h2>Projects, Environments &amp; Variants</h2>
-						<p class="note">Add or remove entries here. Their connection strings / API URLs are edited on the Settings tab.</p>
+						<p class="note">Add or remove entries here. Their connection strings / API URLs are edited on the Environments tab.</p>
 
 						<label for="manageProjectSelect">Project</label>
 						<div class="manage-row">
@@ -207,6 +201,59 @@
 
 						<p id="manageStatus" class="note" hidden></p>
 					</div>
+
+					<div class="panel">
+						<h2>Project Setup</h2>
+						<p class="note">Pick the project's folders and click "Auto Setup" — the tool finds the rest (branch, build file, connection string, API URL) by itself. Then click Save.</p>
+
+						<div id="quickFolders"></div>
+						<div class="quick-actions">
+							<button type="button" id="addReactFolderBtn" class="small-btn">+ Add another React app</button>
+							<button type="button" id="autoSetupBtn" class="primary-btn">🔍&nbsp; Auto Setup</button>
+						</div>
+						<div id="autoSetupResult" class="auto-result" hidden></div>
+
+						<details id="advancedSetup" class="advanced-setup">
+							<summary>⚙ Advanced — repos, artifacts &amp; patch rules (for developers)</summary>
+							<h3 class="setup-head">Repos</h3>
+							<div class="setup-cols setup-repo">
+								<span>Id</span><span>Folder path</span><span>Deploy branch</span><span></span>
+							</div>
+							<div id="reposEditor"></div>
+							<button type="button" id="addRepoBtn" class="small-btn setup-add">+ Add Repo</button>
+
+							<h3 class="setup-head">Artifacts</h3>
+							<div class="setup-cols setup-artifact">
+								<span>Id</span><span>Repo</span><span>Type</span><span>csproj / build dir</span><span>Output folder</span><span></span>
+							</div>
+							<div id="artifactsEditor"></div>
+							<button type="button" id="addArtifactBtn" class="small-btn setup-add">+ Add Artifact</button>
+
+							<h3 class="setup-head">Patch Rules</h3>
+							<div class="setup-cols setup-rule">
+								<span>Repo</span><span>File (inside repo)</span><span>Kind</span><span>Key in file</span><span>Field</span><span></span>
+							</div>
+							<div id="patchRulesEditor"></div>
+							<button type="button" id="addPatchRuleBtn" class="small-btn setup-add">+ Add Patch Rule</button>
+						</details>
+
+						<div class="setup-save">
+							<button type="button" id="saveProjectSetupBtn" class="primary-btn">💾&nbsp; Save Project Setup</button>
+							<span id="projectSetupStatus"></span>
+						</div>
+					</div>
+				</section>
+
+				<!-- ===================== DETECT PROJECTS TAB ===================== -->
+				<section id="tab-detect" class="tab-page">
+					<div class="panel">
+						<h2>Project Paths</h2>
+						<p class="note">Where each project's repos live on this PC, and which branch each one is currently on. If a path is missing (a new PC, or a changed drive letter), Detect Paths scans every drive and fills it in automatically.</p>
+						<div id="pathsView" class="paths"></div>
+						<button id="detectPathsBtn" class="primary-btn">🔍&nbsp; Detect Paths</button>
+						<span id="detectStatus"></span>
+						<div id="detectResults" class="detect-results" hidden></div>
+					</div>
 				</section>
 			</main>
 
@@ -215,6 +262,9 @@
 			</footer>
 		</div>
 	</div>
+
+	<!-- Pick list for an Environments-tab value field, filled from the project's own files. -->
+	<div id="candidatePopover" class="candidate-popover" hidden></div>
 
 	<!-- Electron disables window.prompt(), so text input asks go through this. -->
 	<div id="askModal" class="modal-overlay" hidden>
