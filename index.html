@@ -75,6 +75,13 @@
 					<div class="panel">
 						<h2>Progress</h2>
 
+						<div id="runTiming" class="run-timing" hidden>
+							<div class="rt-item"><span class="rt-k">⏱ Elapsed</span><span id="rtElapsed" class="rt-v">0:00</span></div>
+							<div class="rt-item rt-main"><span class="rt-k">⏳ Time remaining</span><span id="rtRemaining" class="rt-v">—</span></div>
+							<div class="rt-item"><span class="rt-k">🏁 Finishes around</span><span id="rtFinish" class="rt-v">—</span></div>
+							<div id="rtNote" class="rt-note"></div>
+						</div>
+
 						<div class="stepper">
 							<div class="progress-row step-item" id="row-gitPull">
 								<div class="step-track">

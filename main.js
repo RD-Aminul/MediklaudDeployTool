@@ -53,9 +53,71 @@ function ensureConfigExists() {
 	}
 }
 
+// Label-only renames shipped in a newer build. Unlike a configVersion bump
+// (which replaces the whole userData copy), this leaves everything a machine
+// has set up itself — repo paths, presets — untouched, and only renames a
+// label still spelled exactly the old way (one a user renamed stays theirs).
+const LABEL_RENAMES = {
+	dcci: {
+		"Local Development (103.135.235.2:8085)": "Local Development",
+		"Test Server (mkl-dcci.mediklauderp.com)": "Test Server",
+		"Live Server (accounts.dhakachamber.com)": "Live Server",
+	},
+}
+
+function applyLabelRenames(cfg) {
+	let changed = false
+	for (const [projKey, renames] of Object.entries(LABEL_RENAMES)) {
+		const project = cfg.projects && cfg.projects[projKey]
+		if (!project) continue
+		for (const env of Object.values(project.environments || {})) {
+			if (renames[env.label]) {
+				env.label = renames[env.label]
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+// A project added to the bundled config in a newer build reaches machines
+// that already had the app installed — without touching anything else in
+// their userData copy (repo paths, presets, their own projects). Keys already
+// offered once are remembered in knownBundledProjects, so a project someone
+// deliberately removed on their machine doesn't come back on every launch.
+function mergeNewBundledProjects(cfg) {
+	if (!app.isPackaged) return false // dev mode already reads the bundled file
+	let bundled
+	try {
+		bundled = JSON.parse(fs.readFileSync(bundledConfigPath, "utf8"))
+	} catch {
+		return false
+	}
+
+	cfg.projects = cfg.projects || {}
+	const known = new Set(cfg.knownBundledProjects || [])
+	let changed = false
+	for (const [key, project] of Object.entries(bundled.projects || {})) {
+		if (!known.has(key) && !cfg.projects[key]) {
+			cfg.projects[key] = JSON.parse(JSON.stringify(project))
+			changed = true
+		}
+		if (!known.has(key)) {
+			known.add(key)
+			changed = true
+		}
+	}
+	if (changed) cfg.knownBundledProjects = [...known]
+	return changed
+}
+
 function loadConfig() {
 	ensureConfigExists()
-	return JSON.parse(fs.readFileSync(configPath, "utf8"))
+	const cfg = JSON.parse(fs.readFileSync(configPath, "utf8"))
+	const renamed = applyLabelRenames(cfg)
+	const merged = mergeNewBundledProjects(cfg)
+	if (renamed || merged) saveConfig(cfg)
+	return cfg
 }
 
 function saveConfig(cfg) {

@@ -156,6 +156,144 @@ function setProgress(step, percent) {
 	if (!el) return
 	el.querySelector(".progress-fill").style.width = percent + "%"
 	el.querySelector(".progress-value").textContent = percent + "%"
+	if (runTimer) runTimer.percent[step] = percent
+}
+
+/* ---------------- time remaining ---------------- */
+
+// Each step's duration is remembered per project/environment/variant/component
+// (a DCCI Live "Both" build takes far longer than a Jail Local "API only"
+// one), and the next run's "time remaining" is worked out from those. Until a
+// setup has run once, rough defaults stand in and the note says so.
+const TIMES_KEY = "mdt-step-times"
+const DEFAULT_SECONDS = { gitPull: 20, patch: 3, build: { api: 100, react: 140, both: 240 }, zip: 40 }
+
+const runTiming = document.getElementById("runTiming")
+const rtElapsed = document.getElementById("rtElapsed")
+const rtRemaining = document.getElementById("rtRemaining")
+const rtFinish = document.getElementById("rtFinish")
+const rtNote = document.getElementById("rtNote")
+
+let runTimer = null // { key, steps, start, stepStart, durations, percent, history, interval }
+
+function loadStepTimes() {
+	try {
+		return JSON.parse(localStorage.getItem(TIMES_KEY)) || {}
+	} catch {
+		return {}
+	}
+}
+
+function saveStepTime(key, step, seconds) {
+	const all = loadStepTimes()
+	const prev = (all[key] || {})[step]
+	// Half old, half new: one slow run (a big npm install after a pull)
+	// nudges the estimate instead of replacing it.
+	all[key] = { ...(all[key] || {}), [step]: prev ? Math.round(prev * 0.5 + seconds * 0.5) : Math.round(seconds) }
+	try {
+		localStorage.setItem(TIMES_KEY, JSON.stringify(all))
+	} catch {}
+}
+
+function formatDuration(seconds) {
+	const s = Math.max(0, Math.round(seconds))
+	const m = Math.floor(s / 60)
+	const h = Math.floor(m / 60)
+	if (h) return `${h}h ${m % 60}m`
+	if (m) return `${m}m ${String(s % 60).padStart(2, "0")}s`
+	return `${s}s`
+}
+
+function formatClock(seconds) {
+	const s = Math.floor(seconds)
+	return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`
+}
+
+function startRunTimer(steps) {
+	const component = componentSelect.value || "both"
+	const key = [projectSelect.value, presetSelect.value, variantSelect.value || "", component].join("|")
+	const history = loadStepTimes()[key] || null
+	const defaults = { ...DEFAULT_SECONDS, build: DEFAULT_SECONDS.build[component] || DEFAULT_SECONDS.build.both }
+	if (runTimer) clearInterval(runTimer.interval)
+	runTimer = {
+		key,
+		steps,
+		start: Date.now(),
+		stepStart: {},
+		durations: {},
+		percent: {},
+		expected: step => (history && history[step]) || defaults[step],
+		fromHistory: !!history,
+		interval: setInterval(updateRunTiming, 1000),
+	}
+	runTiming.hidden = false
+	runTiming.classList.remove("finished", "failed")
+	rtNote.textContent = history ? "" : "First run for this setup — rough estimate, gets accurate after this run."
+	updateRunTiming()
+}
+
+function estimateRemaining() {
+	const t = runTimer
+	const now = Date.now()
+	let total = 0
+	for (const step of STEPS) {
+		if (!t.steps[step] || t.durations[step] !== undefined) continue
+		const el = row(step)
+		if (el && el.classList.contains("skipped")) continue
+		const expected = t.expected(step)
+		if (t.stepStart[step] === undefined) {
+			total += expected
+			continue
+		}
+		// Running now: trust the remembered duration while it holds; once the
+		// step overruns it, fall back to how far its progress bar has got.
+		const elapsed = (now - t.stepStart[step]) / 1000
+		const pct = t.percent[step] || 0
+		if (elapsed < expected * 0.95) total += expected - elapsed
+		else if (pct >= 10 && pct < 100) total += (elapsed * (100 - pct)) / pct
+		else total += Math.max(5, expected * 0.1)
+	}
+	return total
+}
+
+function updateRunTiming() {
+	if (!runTimer) return
+	rtElapsed.textContent = formatClock((Date.now() - runTimer.start) / 1000)
+	const remaining = estimateRemaining()
+	rtRemaining.textContent = `~${formatDuration(remaining)}`
+	rtFinish.textContent = new Date(Date.now() + remaining * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+}
+
+function stepTimingEvent(step, status) {
+	const t = runTimer
+	if (!t) return
+	if (status === "running") t.stepStart[step] = Date.now()
+	if (status === "done" && t.stepStart[step] !== undefined) {
+		const seconds = (Date.now() - t.stepStart[step]) / 1000
+		t.durations[step] = seconds
+		saveStepTime(t.key, step, seconds)
+		const value = row(step) && row(step).querySelector(".progress-value")
+		if (value) value.textContent = `✓ ${formatDuration(seconds)}`
+	}
+	updateRunTiming()
+}
+
+function stopRunTimer(outcome) {
+	if (!runTimer) return
+	clearInterval(runTimer.interval)
+	const total = (Date.now() - runTimer.start) / 1000
+	rtElapsed.textContent = formatClock(total)
+	if (outcome === "done") {
+		rtRemaining.textContent = "Done ✓"
+		rtFinish.textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+		rtNote.textContent = `Total ${formatDuration(total)}.`
+	} else {
+		rtRemaining.textContent = outcome === "cancelled" ? "Cancelled" : "Stopped — failed"
+		rtFinish.textContent = "—"
+		rtNote.textContent = ""
+	}
+	runTiming.classList.add(outcome === "done" ? "finished" : "failed")
+	runTimer = null
 }
 
 function setStepState(step, state) {
@@ -380,10 +518,27 @@ function renderDestInfo() {
 
 /* ---------------- settings ---------------- */
 
+// runtimeIdentifier is a dotnet "-r" value — meaningless to most people, so
+// the Environments tab offers it as a plain-language dropdown instead.
+const RUNTIME_OPTIONS = [
+	["", "Windows / IIS server — normal build (needs .NET installed on the server)"],
+	["linux-x64", "Linux server — self-contained (linux-x64)"],
+	["win-x64", "Windows server without .NET — self-contained (win-x64)"],
+]
+
+function runtimeSelectHtml(attrs, value) {
+	const options = RUNTIME_OPTIONS.some(([v]) => v === value)
+		? RUNTIME_OPTIONS
+		: [...RUNTIME_OPTIONS, [value, `Custom: ${value}`]] // keep a hand-typed value visible
+	return `<select ${attrs}>${options
+		.map(([v, text]) => `<option value="${escapeHtml(v)}"${v === value ? " selected" : ""}>${escapeHtml(text)}</option>`)
+		.join("")}</select>`
+}
+
 const ENV_FIELDS = [
 	["publishDir", "Publish Folder (blank = timestamped folder under outputRoot)"],
 	["archiveName", "Archive Name (blank = no archive)"],
-	["runtimeIdentifier", "API Runtime (blank = portable / framework-dependent)"],
+	["runtimeIdentifier", "API Runtime — which server the API build is for"],
 	["iisSiteName", "IIS Site to stop during publish (blank = none)"],
 	["iisAppPool", "IIS App Pool to stop during publish (blank = none)"],
 ]
@@ -558,6 +713,20 @@ function renderPresetEditor() {
 				ENV_FIELDS.map(([field, label]) => {
 					const variantAttr = variantKey ? ` data-variant="${escapeHtml(variantKey)}"` : ""
 					const value = target[field] !== undefined && target[field] !== "" ? target[field] : env[field]
+					const attrs = `data-proj="${projKey}" data-env="${envKey}"${variantAttr} data-field="${field}"`
+					if (field === "runtimeIdentifier") {
+						return `
+						<label>${escapeHtml(label)}</label>
+						${runtimeSelectHtml(attrs, value || "")}`
+					}
+					if (field === "publishDir") {
+						return `
+						<label>${escapeHtml(label)}</label>
+						<div class="value-field">
+							<input type="text" ${attrs} value="${escapeHtml(value)}" placeholder="E:\\Publish\\MyProject" />
+							<button type="button" class="small-btn browse-publish-btn" title="Choose the publish folder">Browse…</button>
+						</div>`
+					}
 					return `
 						<label>${escapeHtml(label)}</label>
 						<input type="text" data-proj="${projKey}" data-env="${envKey}"${variantAttr} data-field="${field}"
@@ -702,6 +871,7 @@ runBtn.addEventListener("click", async () => {
 	}
 
 	resetProgress(steps)
+	startRunTimer(steps)
 
 	try {
 		const result = await window.api.runPipeline(
@@ -716,7 +886,9 @@ runBtn.addEventListener("click", async () => {
 			: `Done. Output folder: ${result.runDir}`
 		openFolderBtn.hidden = false
 		openFolderBtn.onclick = () => window.api.openFolder(result.runDir)
+		stopRunTimer("done")
 	} catch (err) {
+		stopRunTimer(err.message.includes("Cancelled by user") ? "cancelled" : "failed")
 		resultBox.textContent = err.message.includes("Cancelled by user") ? "Cancelled." : `Failed: ${err.message}`
 		resultBox.classList.add("failed")
 		if (logEl.hidden) {
@@ -1622,9 +1794,21 @@ async function openCandidatePopover(btn) {
 	filterInput.focus()
 }
 
-presetEditor.addEventListener("click", e => {
+presetEditor.addEventListener("click", async e => {
 	const btn = e.target.closest(".pick-btn")
 	if (btn) openCandidatePopover(btn)
+
+	const browse = e.target.closest(".browse-publish-btn")
+	if (!browse) return
+	const input = browse.parentElement.querySelector("input")
+	const picked = await window.api.pickFolder(input.value.trim())
+	await window.api.focusWindow() // a native dialog can leave inputs unfocusable
+	if (!picked || picked === input.value) return
+	input.value = picked
+	input.classList.add("just-picked")
+	setTimeout(() => input.classList.remove("just-picked"), 900)
+	saveStatus.classList.add("pending")
+	saveStatus.textContent = "Unsaved changes — click Save Presets to keep them."
 })
 
 candidatePopover.addEventListener("click", e => {
@@ -1662,7 +1846,7 @@ window.addEventListener("resize", () => {
 })
 
 saveConfigBtn.addEventListener("click", async () => {
-	presetEditor.querySelectorAll("input[data-proj]").forEach(input => {
+	presetEditor.querySelectorAll("input[data-proj], select[data-proj]").forEach(input => {
 		const { proj, env, field, valueField, variant } = input.dataset
 		const envConfig = config.projects[proj].environments[env]
 		const target = variant ? envConfig.variants[variant] : envConfig
@@ -1691,6 +1875,7 @@ window.api.onStep(({ step, status }) => {
 	}
 	setStepState(step, status)
 	if (status === "done") setProgress(step, 100)
+	stepTimingEvent(step, status)
 })
 
 init()
