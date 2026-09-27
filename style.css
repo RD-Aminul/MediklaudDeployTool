@@ -356,6 +356,35 @@ button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 .progress-label { font-size: 13px; color: var(--text); }
 .progress-value { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
+/* Elapsed / time remaining / finish time above the stepper */
+.run-timing {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 10px;
+	margin: 0 0 20px;
+	animation: tabIn 0.2s var(--ease);
+}
+.run-timing[hidden] { display: none; }
+.rt-item {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 12px 14px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--panel-2);
+}
+.rt-k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+.rt-v { font-size: 20px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.rt-main { border-color: var(--accent); background: var(--accent-soft); }
+.rt-main .rt-v { color: var(--accent); }
+.run-timing.finished .rt-main { border-color: var(--green); background: var(--green-soft); }
+.run-timing.finished .rt-main .rt-v { color: var(--green); }
+.run-timing.failed .rt-main { border-color: var(--red); background: var(--red-soft); }
+.run-timing.failed .rt-main .rt-v { color: var(--red); }
+.rt-note { grid-column: 1 / -1; font-size: 11.5px; color: var(--muted); }
+.rt-note:empty { display: none; }
+
 .progress-track {
 	height: 7px;
 	background: #0a0e14;

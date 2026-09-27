@@ -25902,7 +25902,10 @@ $ ${command} ${args.join(" ")}   (cwd: ${cwd})
       const useYarn = hasYarn();
       const tool = useYarn ? "yarn" : "npm";
       if (!useYarn) onLine("\n[INFO] yarn not found on this machine \u2014 using npm instead.\n");
-      const installArgs = useYarn ? ["install", "--ignore-engines"] : ["install"];
+      const installArgs = useYarn ? ["install", "--ignore-engines"] : ["install", "--legacy-peer-deps"];
+      if (!useYarn) {
+        onLine("[INFO] For builds identical to the developers' (yarn.lock), install yarn once: npm install -g yarn\n");
+      }
       onLine(`
 Syncing node_modules with package.json (${tool} install)...
 `);
@@ -26481,9 +26484,58 @@ function ensureConfigExists() {
     fs.copyFileSync(bundledConfigPath, configPath);
   }
 }
+var LABEL_RENAMES = {
+  dcci: {
+    "Local Development (103.135.235.2:8085)": "Local Development",
+    "Test Server (mkl-dcci.mediklauderp.com)": "Test Server",
+    "Live Server (accounts.dhakachamber.com)": "Live Server"
+  }
+};
+function applyLabelRenames(cfg) {
+  let changed = false;
+  for (const [projKey, renames] of Object.entries(LABEL_RENAMES)) {
+    const project = cfg.projects && cfg.projects[projKey];
+    if (!project) continue;
+    for (const env of Object.values(project.environments || {})) {
+      if (renames[env.label]) {
+        env.label = renames[env.label];
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+function mergeNewBundledProjects(cfg) {
+  if (!app.isPackaged) return false;
+  let bundled;
+  try {
+    bundled = JSON.parse(fs.readFileSync(bundledConfigPath, "utf8"));
+  } catch {
+    return false;
+  }
+  cfg.projects = cfg.projects || {};
+  const known = new Set(cfg.knownBundledProjects || []);
+  let changed = false;
+  for (const [key, project] of Object.entries(bundled.projects || {})) {
+    if (!known.has(key) && !cfg.projects[key]) {
+      cfg.projects[key] = JSON.parse(JSON.stringify(project));
+      changed = true;
+    }
+    if (!known.has(key)) {
+      known.add(key);
+      changed = true;
+    }
+  }
+  if (changed) cfg.knownBundledProjects = [...known];
+  return changed;
+}
 function loadConfig() {
   ensureConfigExists();
-  return JSON.parse(fs.readFileSync(configPath, "utf8"));
+  const cfg = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  const renamed = applyLabelRenames(cfg);
+  const merged = mergeNewBundledProjects(cfg);
+  if (renamed || merged) saveConfig(cfg);
+  return cfg;
 }
 function saveConfig(cfg) {
   ensureConfigExists();

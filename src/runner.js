@@ -165,8 +165,15 @@ function yarnBuild(reactRepoPath, onLine, onProgress) {
 	// "engines" range doesn't match the installed Node — even a lint-only
 	// devDependency nobody runs directly. That range is usually far stricter
 	// than what the package actually needs, so --ignore-engines treats it as
-	// advisory instead of a hard stop. npm already only warns, never blocks.
-	const installArgs = useYarn ? ["install", "--ignore-engines"] : ["install"]
+	// advisory instead of a hard stop. npm only warns about engines, but npm 7+
+	// refuses to install at all on a peer-dependency conflict (e.g. an old
+	// react-toast-notifications that declares an older React as its peer) —
+	// something yarn classic never enforces, which is why these repos build
+	// fine with yarn. --legacy-peer-deps gives npm yarn's behaviour there.
+	const installArgs = useYarn ? ["install", "--ignore-engines"] : ["install", "--legacy-peer-deps"]
+	if (!useYarn) {
+		onLine("[INFO] For builds identical to the developers' (yarn.lock), install yarn once: npm install -g yarn\n")
+	}
 
 	onLine(`\nSyncing node_modules with package.json (${tool} install)...\n`)
 	return runCommand(tool, installArgs, reactRepoPath, onLine, null, null).then(() =>
