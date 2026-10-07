@@ -30,6 +30,7 @@ const saveStatus = document.getElementById("saveStatus")
 const detectPathsBtn = document.getElementById("detectPathsBtn")
 const detectStatus = document.getElementById("detectStatus")
 const detectResults = document.getElementById("detectResults")
+const detectSummary = document.getElementById("detectSummary")
 const manageProjectSelect = document.getElementById("manageProjectSelect")
 const manageEnvSelect = document.getElementById("manageEnvSelect")
 const manageVariantSelect = document.getElementById("manageVariantSelect")
@@ -767,14 +768,21 @@ function renderPaths() {
 	})
 	Object.entries(config.projects).forEach(([projKey, project]) => {
 		Object.entries(project.repos).forEach(([id, p]) => {
-			const branch = currentBranches[`${projKey}.${id}`]
-			const branchNote = branch ? ` <span class="branch-tag">branch: ${escapeHtml(branch)}</span>` : ""
+			const key = `${projKey}.${id}`
+			const branch = currentBranches[key]
+			// currentBranches only has a null for a path that does not exist on disk.
+			const missing = key in currentBranches && branch === null
+			const note = branch
+				? ` <span class="branch-tag">branch: ${escapeHtml(branch)}</span>`
+				: missing
+					? ` <span class="path-missing-tag">⚠ folder not found</span>`
+					: ""
 			rows.push(
-				`<div><span class="k">${escapeHtml(project.label + " / " + id)}</span><span class="v">${escapeHtml(p)}${branchNote}</span></div>`
+				`<div><span class="k">${escapeHtml(project.label + " / " + id)}</span><span class="v${missing ? " path-missing" : ""}">${escapeHtml(p)}${note}</span></div>`
 			)
 		})
 	})
-	pathsView.innerHTML = rows.join("")
+	pathsView.innerHTML = rows.length ? rows.join("") : `<div class="paths-empty">No projects are configured yet — add one in the Projects tab.</div>`
 }
 
 async function refreshBranches() {
@@ -805,16 +813,45 @@ async function refreshAfterDetect(results) {
 	renderDetectResults(results)
 }
 
+function setDetectStatus(text, busy = false) {
+	detectStatus.textContent = text
+	detectStatus.classList.toggle("busy", busy)
+}
+
+function showDetectSummary(results, prefix = "") {
+	const found = results.filter(r => r.foundPath).length
+	const notFound = results.length - found
+	let kind = "ok"
+	let text
+	if (results.length === 0) {
+		text = "✅ Nothing to do — every saved folder already exists on this PC."
+	} else if (notFound === 0) {
+		text = `✅ Found and saved ${found} missing folder${found > 1 ? "s" : ""}. The list above is updated.`
+	} else {
+		kind = "warn"
+		text =
+			`⚠ Found ${found} of ${results.length} missing folders. ${notFound} could not be found on any drive — ` +
+			`the folder may not be cloned on this PC yet, or is named differently. Clone it, or set its path manually in the Projects tab.`
+	}
+	detectSummary.className = `detect-summary ${kind}`
+	detectSummary.textContent = prefix + text
+	detectSummary.hidden = false
+}
+
 detectPathsBtn.addEventListener("click", async () => {
 	detectPathsBtn.disabled = true
-	detectStatus.textContent = "Scanning drives — this can take up to a minute..."
+	detectPathsBtn.classList.add("scanning")
+	detectSummary.hidden = true
+	detectResults.hidden = true
+	setDetectStatus("Searching all drives for missing folders — this can take up to a minute. Please keep this window open.", true)
 	try {
 		const results = await window.api.detectPaths()
-		detectStatus.textContent =
-			results.length === 0 ? "All configured paths already exist — nothing to detect." : "Done."
+		setDetectStatus("Scan finished.")
 		await refreshAfterDetect(results)
+		showDetectSummary(results)
 	} finally {
 		detectPathsBtn.disabled = false
+		detectPathsBtn.classList.remove("scanning")
 	}
 })
 
@@ -822,8 +859,9 @@ window.api.onAutoDetectDone(async results => {
 	// Surfacing this only matters when something was actually missing — jump to
 	// Detect Projects so the user notices the paths that got filled in (or didn't).
 	document.querySelector('.tab[data-tab="detect"]').click()
-	detectStatus.textContent = "Paths auto-detected on first launch."
+	setDetectStatus("Scan finished.")
 	await refreshAfterDetect(results)
+	showDetectSummary(results, "First launch: some saved folders were missing, so the tool searched for them automatically. ")
 })
 
 async function init() {
