@@ -145,13 +145,13 @@ function createWindow() {
 	// One-time, on the very first launch only (tracked in the saved config so it
 	// never repeats): fill in any repo path that doesn't exist on this machine.
 	// Runs after the page loads so sendLog/the result event actually reach it.
-	mainWindow.webContents.once("did-finish-load", () => {
+	mainWindow.webContents.once("did-finish-load", async () => {
 		const cfg = loadConfig()
 		if (cfg.autoDetectDone) return
 		cfg.autoDetectDone = true
 		saveConfig(cfg)
 
-		const { changed, results } = detectAndFillMissingPaths(cfg, sendLog)
+		const { changed, results } = await detectAndFillMissingPaths(cfg, sendLog)
 		if (changed) saveConfig(cfg)
 		if (results.length > 0) {
 			mainWindow.webContents.send("auto-detect-done", results)
@@ -194,7 +194,7 @@ ipcMain.handle("save-config", (_evt, cfg) => {
 // path that already resolves is left untouched, even if a same-named folder
 // turns up elsewhere — that would just be a stray/backup copy, not the one to
 // build from.
-function detectAndFillMissingPaths(cfg, onLine) {
+async function detectAndFillMissingPaths(cfg, onLine) {
 	const missing = []
 	for (const [projKey, project] of Object.entries(cfg.projects)) {
 		for (const [repoId, repoPath] of Object.entries(project.repos)) {
@@ -205,7 +205,7 @@ function detectAndFillMissingPaths(cfg, onLine) {
 	}
 	if (missing.length === 0) return { changed: false, results: [] }
 
-	const found = findFolders(
+	const found = await findFolders(
 		missing.map(m => m.folderName),
 		onLine
 	)
@@ -230,9 +230,9 @@ ipcMain.handle("get-current-branches", () => {
 	return result
 })
 
-ipcMain.handle("detect-paths", () => {
+ipcMain.handle("detect-paths", async () => {
 	const cfg = loadConfig()
-	const { changed, results } = detectAndFillMissingPaths(cfg, sendLog)
+	const { changed, results } = await detectAndFillMissingPaths(cfg, sendLog)
 	if (changed) saveConfig(cfg)
 	return results
 })

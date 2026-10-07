@@ -255,10 +255,22 @@
 				<section id="tab-detect" class="tab-page">
 					<div class="panel">
 						<h2>Project Paths</h2>
-						<p class="note">Where each project's repos live on this PC, and which branch each one is currently on. If a path is missing (a new PC, or a changed drive letter), Detect Paths scans every drive and fills it in automatically.</p>
+						<div class="detect-intro">
+							<div class="detect-intro-title">What does this page do?</div>
+							<p>The tool needs to know <b>where each project's code folders are on this PC</b> before it can build or deploy. This page shows those saved locations and the Git branch each one is on.</p>
+							<ol class="detect-howto">
+								<li><b>Check</b> — the list below shows every saved folder path. A path in <span class="tag-missing">red</span> no longer exists (new PC, moved folder, or changed drive letter).</li>
+								<li><b>Click "Detect Paths"</b> — the tool searches all drives (C:, D:, …) for the missing folders by their folder name.</li>
+								<li><b>Result</b> — found folders are saved automatically. Folders that are already correct are never changed.</li>
+							</ol>
+						</div>
+						<div class="detect-section-title">Saved folder locations</div>
 						<div id="pathsView" class="paths"></div>
-						<button id="detectPathsBtn" class="primary-btn">🔍&nbsp; Detect Paths</button>
-						<span id="detectStatus"></span>
+						<div class="detect-actions">
+							<button id="detectPathsBtn" class="primary-btn"><span class="detect-icon">🔍</span>&nbsp; Detect Paths</button>
+							<span id="detectStatus"></span>
+						</div>
+						<div id="detectSummary" class="detect-summary" hidden></div>
 						<div id="detectResults" class="detect-results" hidden></div>
 					</div>
 				</section>

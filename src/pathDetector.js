@@ -37,15 +37,20 @@ function listDrives() {
 // hang the app indefinitely. A matched folder is not descended into further —
 // these are project repo roots, nothing relevant lives one level up from a
 // same-named collision.
-function findFolders(targetNames, onLine, options = {}) {
+async function findFolders(targetNames, onLine, options = {}) {
 	const maxDepth = options.maxDepth ?? 8
 	const budgetMs = options.budgetMs ?? 45000
 	const remaining = new Set(targetNames)
 	const found = {}
 	const deadline = Date.now() + budgetMs
 
-	function walk(dir, depth) {
+	// Yield to the event loop now and then so the window's IPC calls (config,
+	// branches) keep being answered while a long scan runs.
+	let visited = 0
+	async function walk(dir, depth) {
 		if (remaining.size === 0 || Date.now() > deadline || depth > maxDepth) return
+
+		if (++visited % 50 === 0) await new Promise(resolve => setImmediate(resolve))
 
 		let entries
 		try {
@@ -67,14 +72,14 @@ function findFolders(targetNames, onLine, options = {}) {
 				continue
 			}
 
-			walk(full, depth + 1)
+			await walk(full, depth + 1)
 		}
 	}
 
 	for (const drive of listDrives()) {
 		if (remaining.size === 0 || Date.now() > deadline) break
 		if (onLine) onLine(`Scanning ${drive} for ${remaining.size} folder(s)...\n`)
-		walk(drive, 0)
+		await walk(drive, 0)
 	}
 
 	return found
