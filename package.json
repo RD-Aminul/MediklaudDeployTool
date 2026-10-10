@@ -20,7 +20,7 @@
     "zip-stream": "^6.0.1"
   },
   "build": {
-    "appId": "com.mediklaud.dccideploytool",
+    "appId": "com.mediklaud.deploytool",
     "productName": "Mediklaud Deploy Tool",
     "files": [
       "main.bundled.js",
